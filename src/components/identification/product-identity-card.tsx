@@ -1,54 +1,77 @@
-import { BadgeCheck, HelpCircle } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import type { ProductIdentification } from "@/types";
+import { BadgeCheck, CircleHelp, CircleDashed } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { order } from "@/components/ui/stagger";
+import type { IdentificationStatus, ProductIdentification } from "@/types";
+
+const STATUS: Record<
+  IdentificationStatus,
+  { label: string; icon: typeof BadgeCheck; className: string }
+> = {
+  confirmed: {
+    label: "Confirmed",
+    icon: BadgeCheck,
+    className: "bg-success/12 text-success",
+  },
+  likely: {
+    label: "Likely",
+    icon: CircleHelp,
+    className: "bg-warning/12 text-warning",
+  },
+  uncertain: {
+    label: "Uncertain",
+    icon: CircleDashed,
+    className: "bg-muted text-muted-foreground",
+  },
+};
+
+export function StatusPill({ status }: { status: IdentificationStatus }) {
+  const { label, icon: Icon, className } = STATUS[status];
+  return (
+    <span
+      className={cn(
+        "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold",
+        className,
+      )}
+    >
+      <Icon className="size-3.5" />
+      {label}
+    </span>
+  );
+}
+
 export function ProductIdentityCard({
   identification: p,
-  image,
+  mock,
 }: {
   identification: ProductIdentification;
-  image?: string;
+  mock: boolean;
 }) {
   return (
-    <Card className="flex flex-col gap-5 sm:flex-row sm:items-center">
-      {image && (
-        <div className="size-24 shrink-0 overflow-hidden rounded-xl bg-muted">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={image}
-            alt="Your uploaded product"
-            className="size-full object-cover"
-          />
-        </div>
-      )}
-      <div className="min-w-0 flex-1">
-        <p className="eyebrow">
-          {p.brand ?? "Brand unknown"} · {p.category ?? "Product"}
-        </p>
-        <h2 className="mt-2 text-2xl font-semibold tracking-tight">
-          {p.productName ?? "Product not yet identified"}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {p.modelNumber
-            ? `Model ${p.modelNumber}`
-            : "Exact model still needs confirmation"}
-          {p.variant ? ` · ${p.variant}` : ""}
-        </p>
-      </div>
-      <Badge
-        className={
-          p.identificationStatus === "confirmed"
-            ? "border-primary/20 bg-accent text-primary"
-            : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-        }
-      >
-        {p.identificationStatus === "confirmed" ? (
-          <BadgeCheck className="size-3.5" />
-        ) : (
-          <HelpCircle className="size-3.5" />
+    <div className="stagger">
+      <div className="flex flex-wrap items-center gap-2" style={order(0)}>
+        <StatusPill status={p.identificationStatus} />
+        {mock && (
+          <span className="inline-flex h-7 items-center rounded-full bg-accent px-2.5 text-xs font-semibold text-foreground/80">
+            Demo data
+          </span>
         )}
-        <span className="capitalize">{p.identificationStatus}</span>
-      </Badge>
-    </Card>
+      </div>
+      <p
+        className="mt-4 text-[13px] font-medium text-muted-foreground"
+        style={order(1)}
+      >
+        {[p.brand ?? "Unknown brand", p.category].filter(Boolean).join(" · ")}
+      </p>
+      <h1
+        className="mt-1 text-[28px] font-bold leading-[1.1] tracking-tight text-balance"
+        style={order(2)}
+      >
+        {p.productName ?? "Not identified yet"}
+      </h1>
+      <p className="mt-2 text-sm text-muted-foreground" style={order(3)}>
+        {p.modelNumber ? `Model ${p.modelNumber}` : "Model needs confirmation"}
+        {p.variant ? ` · ${p.variant}` : ""}
+      </p>
+    </div>
   );
 }

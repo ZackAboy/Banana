@@ -1,9 +1,10 @@
-import { ExternalLink, ShoppingBag } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { ArrowUpRight } from "lucide-react";
+import { order } from "@/components/ui/stagger";
+import { cn } from "@/lib/utils";
 import type { ProductOffer } from "@/types";
-function formatPrice(offer: ProductOffer) {
-  if (offer.price === null || !offer.currency) return "Price unavailable";
+
+export function formatPrice(offer: Pick<ProductOffer, "price" | "currency">) {
+  if (offer.price === null || !offer.currency) return "—";
   try {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -13,6 +14,24 @@ function formatPrice(offer: ProductOffer) {
     return `${offer.price.toFixed(2)} ${offer.currency}`;
   }
 }
+/** Cheapest priced offer. Only compares offers sharing the first priced offer's currency. */
+export function lowestOffer(offers: ProductOffer[]) {
+  const priced = offers.filter((o) => o.price !== null && o.currency);
+  const currency = priced[0]?.currency;
+  return priced
+    .filter((o) => o.currency === currency)
+    .reduce<ProductOffer | null>(
+      (best, o) => (!best || o.price! < best.price! ? o : best),
+      null,
+    );
+}
+const CONDITION: Record<ProductOffer["condition"], string> = {
+  new: "bg-success/12 text-success",
+  refurbished: "bg-sky-500/12 text-sky-600 dark:text-sky-400",
+  used: "bg-warning/12 text-warning",
+  unknown: "bg-muted text-muted-foreground",
+};
+
 export function PriceComparison({
   offers,
   mock,
@@ -20,67 +39,71 @@ export function PriceComparison({
   offers: ProductOffer[];
   mock: boolean;
 }) {
-  return (
-    <Card>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="flex items-center gap-2 font-semibold">
-          <ShoppingBag className="size-4 text-primary" />
-          {mock ? "Illustrative offers" : "Price comparison"}
-        </h3>
-        <Badge>{offers.length} offers</Badge>
-      </div>
-      <p className="mt-2 text-xs text-muted-foreground">
-        Grouped by condition and currency, then by price. Verify shipping, tax,
-        and warranty.
+  const best = lowestOffer(offers);
+  if (!offers.length)
+    return (
+      <p className="py-10 text-center text-sm text-muted-foreground">
+        No offers for this exact model.
       </p>
-      {!offers.length && (
-        <p className="py-6 text-sm text-muted-foreground">
-          No matching offers were found for this exact product.
-        </p>
-      )}
-      <div className="mt-4 divide-y divide-border">
+    );
+  return (
+    <div>
+      <ul className="stagger space-y-2.5">
         {offers.map((offer, index) => (
-          <div
-            key={`${offer.retailer}-${index}`}
-            className="flex items-center justify-between gap-3 py-4"
-          >
-            <div className="min-w-0">
-              <p className="text-sm font-medium">{offer.retailer}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                <span className="capitalize">{offer.condition}</span> ·{" "}
-                {offer.availability ?? "Availability unknown"}
-              </p>
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                {offer.currency ?? "Currency unknown"} · Retrieved{" "}
-                {new Intl.DateTimeFormat("en-US", {
-                  dateStyle: "medium",
-                  timeZone: "America/New_York",
-                }).format(new Date(offer.retrievedAt))}
-              </p>
-            </div>
-            <div className="shrink-0 text-right">
-              <p className="text-lg font-semibold tracking-tight">
-                {formatPrice(offer)}
-              </p>
-              <a
-                className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                href={offer.productUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {mock ? "Demo link" : "View offer"}
-                <ExternalLink className="size-3" />
-              </a>
-            </div>
-          </div>
+          <li key={`${offer.retailer}-${index}`} style={order(index)}>
+            <a
+              href={offer.productUrl}
+              target="_blank"
+              rel="noreferrer"
+              className={cn(
+                "group flex items-center gap-3.5 rounded-2xl bg-card p-3.5 transition active:scale-[0.98]",
+                offer === best && "ring-2 ring-brand",
+              )}
+            >
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-muted text-base font-bold">
+                {offer.retailer.charAt(0).toUpperCase()}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] font-semibold">
+                  {offer.retailer}
+                </span>
+                <span className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span
+                    className={cn(
+                      "rounded-md px-1.5 py-0.5 font-medium capitalize",
+                      CONDITION[offer.condition],
+                    )}
+                  >
+                    {offer.condition}
+                  </span>
+                  <span className="truncate">
+                    {offer.availability ?? "Availability unknown"}
+                  </span>
+                </span>
+              </span>
+              <span className="shrink-0 text-right">
+                {offer === best && (
+                  <span className="mb-0.5 block text-[10px] font-bold uppercase tracking-wider text-warning">
+                    Lowest
+                  </span>
+                )}
+                <span className="flex items-center gap-1 text-lg font-bold tracking-tight">
+                  {formatPrice(offer)}
+                  <ArrowUpRight className="size-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                </span>
+              </span>
+            </a>
+          </li>
         ))}
-      </div>
-      {mock && (
-        <p className="mt-2 rounded-lg bg-muted p-3 text-xs leading-5 text-muted-foreground">
-          Synthetic prices and retailers for the demo. Links are placeholders,
-          not shopping listings.
-        </p>
-      )}
-    </Card>
+      </ul>
+      <p className="mt-4 text-center text-[11px] leading-5 text-muted-foreground">
+        {mock
+          ? "Sample prices and retailers · links are placeholders"
+          : `Check shipping, tax and warranty · retrieved ${new Intl.DateTimeFormat(
+              "en-US",
+              { dateStyle: "medium", timeZone: "America/New_York" },
+            ).format(new Date(offers[0].retrievedAt))}`}
+      </p>
+    </div>
   );
 }
