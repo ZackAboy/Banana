@@ -8,6 +8,10 @@ import {
 import { semanticVisionEvidenceSchema } from "@/schemas/evidence";
 import { productIdentificationSchema } from "@/schemas/domain";
 import {
+  deriveSearchAssociations,
+  searchGroupHasConflict,
+} from "./search-associations";
+import {
   ocrEvidenceSchema,
   retrievalEvidenceSchema,
   type EvidenceReference,
@@ -185,6 +189,14 @@ export function adaptEvidence(input: FusionInput): AdaptedEvidence {
         }
       }
     });
+    if (searchGroupHasConflict(candidate))
+      result.conflicts.push({
+        code: "source_group_identity_conflict",
+        material: true,
+        evidenceRefs: candidate.observations.map(
+          (_, index) => `search:${candidate.id}:${index}`,
+        ),
+      });
   }
   result.search?.providerRuns.forEach((run, index) => {
     add({
@@ -200,7 +212,12 @@ export function adaptEvidence(input: FusionInput): AdaptedEvidence {
   const ids = (result.search?.candidates ?? []).map((c) => c.id);
   if (new Set(ids).size !== ids.length)
     throw new Error("Duplicate Search candidate ID.");
-  for (const [index, association] of (input.associations ?? []).entries()) {
+  // An explicit array (including []) retains caller control. Omitted findings
+  // derive only the narrow direct-subject cases supported by returned Search.
+  const associations =
+    input.associations ??
+    (result.search ? deriveSearchAssociations(result.search) : []);
+  for (const [index, association] of associations.entries()) {
     const candidate = result.search?.candidates.find(
       (c) => c.id === association.candidateId,
     );

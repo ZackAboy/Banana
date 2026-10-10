@@ -102,7 +102,7 @@ export const retrievalEvidenceSchema = z.looseObject({
   ),
 });
 
-/** A reviewed interpretation of ONE source observation, never a search score.
+/** A source-linked interpretation of ONE observation, never a search score.
  * The caller must establish that the identifier names the subject product,
  * rather than an accessory target or another product mentioned on the page.
  * Merely filling this in from a literal match is invalid integration behavior.
@@ -122,9 +122,8 @@ export interface ExternalAssociation {
   originGroup?: string;
 }
 
-// TODO(ProductSearch): produce source-linked product_identity/compatible_with/
-// unresolved findings through a public verification interface. Discovery's
-// literal observations alone cannot safely fill ExternalAssociation.
+// deriveSearchAssociations supplies conservative direct-title findings. Other
+// patterns require reviewed subject-product association; occurrence is not proof.
 
 /** Optional inspection finding. Raw cosine scores cannot manufacture this. */
 export interface VisualAssessment {
@@ -141,7 +140,7 @@ export interface FusionInput {
   imageCount: number;
   ocr?: unknown;
   search?: ProductSearchResult;
-  associations?: ExternalAssociation[];
+  associations?: ExternalAssociation[]; // Omitted: derive from Search; []: opt out.
   retrieval?: unknown;
   visualAssessments?: VisualAssessment[];
   semantic?: SemanticVisionSignal;

@@ -7,6 +7,7 @@ export {
   suggestedFusionImage,
   toProductIdentification,
 } from "./adjudication";
+export { deriveSearchAssociations } from "./search-associations";
 export type {
   FusionInput,
   FusionResult,
@@ -34,8 +35,8 @@ function containsIdentifier(observation: string, identifier: string | null) {
 // Legacy Gemini-only boundary. Runtime orchestration still calls this policy;
 // independent evidence callers use fuseProductEvidence above. Do not upgrade
 // Gemini's transcription by treating it as independently extracted OCR.
-// TODO(Fusion): wire independent evidence in services/analysis only after the
-// versioned Python bridge and Product Search association producer are agreed.
+// TODO(Fusion): wire independent evidence in services/analysis after agreeing
+// the versioned Python bridge; direct Search subject associations are offline now.
 export function fuseEvidence(
   signal: SemanticVisionSignal,
 ): ProductIdentification {

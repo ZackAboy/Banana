@@ -16,7 +16,7 @@ evidence to the new primitive.** Mock mode is unchanged.
 | `imageCount`        | Number of submitted views; image references are 1-based within this request.                                      |
 | `ocr`               | Python `ocr.v1` JSON. Local readers validate used fields, spans and image references, retaining extra provenance. |
 | `search`            | Existing `ProductSearchResult`, validated using Search's public schema.                                           |
-| `associations`      | Explicit reviewed product-association findings linked to a candidate ID and zero-based observation index.         |
+| `associations`      | Optional supplied findings; omitted derives conservative Search findings; `[]` explicitly opts out.               |
 | `retrieval`         | Python `retrieval.v1` JSON after retrieval has run. Candidate IDs and supplied source URLs must link to Search.   |
 | `visualAssessments` | Optional inspection findings linked to a candidate/image comparison: compatible, concern or contradiction.        |
 | `semantic`          | Optional existing `SemanticVisionSignal`. Gemini is never required.                                               |
@@ -31,10 +31,49 @@ compatibility wording, but **cannot establish the truth of a supplied review
 finding**. Do not populate it automatically from `matchSignals`, Search query
 echoes, `modelNumbersSeen`, ranking or literal occurrence alone.
 
-The current Search contract supplies discovery observations, not this association
-judgment. Without a reviewed association, its existing results remain unresolved.
-The tests use explicitly handcrafted findings, not real external verification.
-No provider or page crawler was added to fill this gap.
+`deriveSearchAssociations(search)` now bridges the existing Search result to
+`ExternalAssociation[]`, using only returned observations. `adaptEvidence`
+invokes it when `associations` is omitted. Explicit supplied findings (including
+an empty array) retain caller control. No provider or page crawler was added.
+
+The deliberately narrow positive rule requires:
+
+- A source brand clue appearing as the exact title prefix (case/whitespace
+  insensitive), followed by a descriptive product name. Query brand/product
+  values and the candidate's representative title never supply missing identity.
+- A Search `literal` typed observation in that observation's title field,
+  rechecked with the public identifier comparator using its query value and case
+  policy. The literal observed spelling must end the title, optionally enclosed
+  in parentheses/brackets. Snippet-only and normalized/extension matches do not
+  qualify. SKU and part numbers additionally require an explicit matching title
+  label; an unlabeled suffix is accepted only for model-number observations.
+- No guarded subject ambiguity in title or snippet: relationship/negation terms
+  such as `for`, `compatible`, `fits`, `not`, or `replacement`; a few accessory
+  nouns (`case`, `cover`, `dock`); or review/comparison wording. This small guard
+  deliberately rejects some genuine listings, including unrelated compatibility
+  statements, rather than attempting general language understanding.
+- No source-group disagreement. Different titles/snippets, known brand/variant clues or
+  nonliteral agreement between same-kind observed identifiers suppress the whole
+  group. Guarded ambiguity in any observation of a multi-observation group also
+  blocks the group. Case/whitespace differences are tolerated, but name aliases
+  and differently worded snippets are not merged. Fusion records `source_group_identity_conflict` with all group
+  observation references, even when no positive association survives.
+
+An accepted finding retains the exact product-name prefix and identifier spelling,
+typed kind/case policy, candidate ID, observation index and an explanatory basis.
+The existing source reference retains URL/domain, title/snippet, provider/engine,
+query/request, timestamp and observations; provenance is dereferenced rather
+than duplicated into a new public contract. Variant clues require a literal
+whitespace-delimited occurrence in the returned text. Rank, similarity, duplicate
+count, source authority scores and untyped token guesses are unused.
+
+Search evidence is sufficient for this restricted direct-listing pattern, **not
+for arbitrary subject association**. A bare identifier mention, missing source
+brand/name, identifier buried in prose, or an ambiguous/misleading title remains
+unresolved. Source text is assumed to describe its subject honestly; this producer
+does not verify a destination page or detect every accessory synonym. The offline
+tests use synthetic provider responses normalized by the real Search module;
+they establish local rule behavior, not live source accuracy.
 
 Likewise, native cosine scores are preserved, not thresholded into visual findings
 or status. A `VisualAssessment` requires a separate, explained inspection or
@@ -63,7 +102,7 @@ Confirmation requires all of:
 
 1. A span-grounded, explicitly labeled physical model/SKU/part number. Spatial
    label inference and generic text are retained but cannot confirm.
-2. A reviewed external **subject-product** association with a literal identifier
+2. A supported external **subject-product** association with a literal identifier
    agreeing exactly in kind and value. Search's public `identifierObservations`
    supplies comparison semantics: models default to case insensitive, SKU/part
    numbers to case sensitive; the stricter declared case policy prevails.
@@ -142,10 +181,11 @@ never sufficient confirmation.
    exposes only `/health`; its local OCR/retrieval modules have no HTTP endpoints.
    Before wiring, add shared Python/TypeScript contract fixtures for both versions.
    The present test reads the existing Python OCR fixture, with no model loading.
-2. **Product Search:** produce reviewed, source-linked subject-product association
-   findings behind a public verification interface. Existing
-   `src/lib/products/verification.ts` remains unimplemented. Discovery's literal
-   observations are deliberately insufficient; do not convert them mechanically.
+2. **Product Search:** supply existing normalized results to Fusion. Direct
+   subject-title association is now implemented offline; richer ambiguous
+   association still requires reviewed findings. Existing
+   `src/lib/products/verification.ts` remains unimplemented; this producer does
+   not replace runtime candidate verification or destination-page validation.
 3. **Product Search + Visual Retrieval:** provide a bounded external-image
    acquisition boundary: Search candidate ID/image URL -> safe fetched bytes ->
    `CandidateImage` -> SigLIP. Preserve the candidate ID/image ID/source URL and
@@ -161,18 +201,22 @@ never sufficient confirmation.
 
 Assumptions: explicit OCR labels refer to the photographed object; OCR's
 `label_role: unknown` is preserved and never relabeled as manufacturer-verified.
-Association findings come from a genuine independent source review. Candidate
+Association findings come from a qualifying external subject title or a genuine
+independent source review. Candidate
 image bytes are faithfully linked by the acquisition caller. Conservative brand
 comparison has no corporate-name aliases; source identities have no name aliases.
 These limitations can produce uncertainty rather than unsafe automatic merging.
 
 ## Validation
 
-`npx vitest run tests/fusion.test.ts` covers the eight requested acceptance cases
-plus focused typed-identifier, provenance, conflict and grounding regressions.
+`npx vitest run tests/search-associations.test.ts tests/fusion.test.ts` covers
+direct subject association, both controller models and an unrelated synthetic
+product, accessory/compatibility/negation, physical and source-group conflicts,
+normalized-only matches, provenance and the original Fusion regressions.
 Tests are offline: no Gemini, external APIs, Python inference or model downloads.
 Run the repository tests, typecheck, lint, format check and `git diff --check`
 alongside them. Python modules/dependencies and public API/provider schemas are
-unchanged. The only existing public surface addition is exporting Search's
-existing identifier comparator from its module entrypoint; no matching semantics
-are changed.
+unchanged. The existing association finding shape is unchanged. The additive
+Fusion export is `deriveSearchAssociations`; omitted `FusionInput.associations`
+now derives findings, while explicit arrays preserve caller control. Search's
+identifier matching semantics are unchanged.
