@@ -60,12 +60,10 @@ AGENTS.md ownership and these stable interfaces. Mock mode defaults on; images
 are not actually analyzed in the demo. Live adapters intentionally return 501,
 and missing live configuration returns 503. Real failures never return fixtures.
 
-| Owner / branch                | TODO and extension points                                                                                                                                                                                           |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Frontend / `feature/frontend` | Refine upload/dashboard with live error and uncertainty responses in `src/components/**`; preserve API schemas                                                                                                      |
-| Vision / `feature/vision`     | `src/lib/ai/identification.ts`: structured Gemini multimodal reasoning/OCR across all images; evidence-based status; shared Gemini client and central model configuration                                           |
-| Shopping / `feature/shopping` | `src/lib/search/lens.ts`, `shopping.ts`, `src/lib/products/verification.ts`: Lens/Shopping calls, exact model/variant verification, normalized conditions/currencies/offers; agree on temporary image URL transport |
-| Reviews / `feature/reviews`   | `src/lib/search/reviews.ts`, `src/lib/ai/reviews.ts`: retrieve source evidence and summarize/recommend with attribution and insufficiency handling                                                                  |
+| Owner / branch                        | TODO and extension points                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Architecture / `feature/architecture` | Identification/Gemini/multi-image/uncertainty in `src/lib/ai/identification.ts`; Lens/Shopping in `src/lib/search`; verification and offers in `src/lib/products`; review discovery/evidence/summarization/recommendations; caching/providers/backend orchestration/APIs; backend/unit/integration tests                                    |
+| UI / `feature/ui`                     | Design/components/responsive layout, upload/camera/previews/multi-image UX, loading/errors/uncertainty/candidate/dashboard presentation, prices/reviews/recommendations/sources presentation, accessibility/interactions/theme, frontend/browser tests; consume existing mock providers and shared contracts, with no external integrations |
 
 Identification is expected to use the public Lens/verification interfaces when
 its live pipeline is wired. Review analysis is expected to consume retrieved
@@ -77,7 +75,7 @@ Known issues/limits:
 - Prices, retailers, identity evidence, and review opinions are synthetic fixtures;
   offer/review links are explicitly labeled example.com placeholders.
 - Lens needs temporary reachable image transport; no hosting/storage is added.
-- Upload signatures are checked; full decode/normalization is future Vision work.
+- Upload signatures are checked; full decode/normalization is future Architecture work.
 - Cache is process-local and nondurable, with no coordination across instances.
 - Next's React/import/accessibility lint plugins currently require ESLint 9;
   ESLint 9 is deprecated. The lint dependency chain has 5 high-severity audit

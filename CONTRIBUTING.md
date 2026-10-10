@@ -4,12 +4,14 @@ Read `AGENTS.md`, `ARCHITECTURE.md`, and the relevant schemas/provider interface
 before changing code. The initial setup spans all workstreams once to establish
 a stable base. Subsequent work should follow these boundaries.
 
-| Workstream | Branch             | Ownership                                                           |
-| ---------- | ------------------ | ------------------------------------------------------------------- |
-| Frontend   | `feature/frontend` | Components, pages/layouts, upload/camera UX and dashboard           |
-| Vision     | `feature/vision`   | Identification, Gemini client, multi-image evidence and uncertainty |
-| Shopping   | `feature/shopping` | Lens/Shopping, products, candidate verification and offers          |
-| Reviews    | `feature/reviews`  | Source discovery, review evidence, summarization and recommendation |
+| Workstream   | Branch                 | Ownership                                                                                                                                                                                                                                   |
+| ------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Architecture | `feature/architecture` | Gemini, identification/uncertainty, Lens/Shopping, verification/offers, review evidence/summarization/recommendations, caching/providers/orchestration/APIs, backend/unit/integration tests                                                 |
+| UI           | `feature/ui`           | Design/components/layouts, responsive upload/camera/previews/multi-image UX, loading/errors/uncertainty/candidates, dashboard/prices/reviews/recommendations/sources presentation, accessibility/interactions/theme, frontend/browser tests |
+
+UI uses existing mock providers and shared contracts; it must not implement
+external API integrations. Architecture avoids presentation changes unless
+required for a shared contract.
 
 Use a separate clone or worktree for concurrent agents. Do not let agents switch
 branches in the same working directory. Avoid direct commits to `main` during
@@ -35,6 +37,7 @@ becoming a synthetic success.
 Use Node 24 LTS and `npm ci`, then run:
 
 ```sh
+npx next typegen       # Generate ignored Next.js declarations on a fresh checkout
 npm run format:check
 npm run typecheck
 npm run lint

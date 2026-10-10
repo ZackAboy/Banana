@@ -1,7 +1,7 @@
 # Coding agent guide
 
 This repository is an AI-powered visual shopping assistant for Banana Hacks.
-Four developers and their coding agents should be able to work concurrently
+Developers and their coding agents work in two primary development workstreams
 through stable contracts with minimal merge conflicts. These instructions apply
 throughout the repository.
 
@@ -20,69 +20,47 @@ module already exists.
 
 ## Workstreams
 
-### 1. Frontend
+### 1. Architecture — `feature/architecture`
 
 Primary ownership:
 
-- `src/components/**`
-- Frontend pages and layouts, including `src/app/**/page.tsx` and
-  `src/app/**/layout.tsx`
-- Upload, drag-and-drop, camera, image preview, and multi-image UX
-- Loading, empty, error, and uncertain-identification states
-- Result dashboard presentation, including identity, evidence, candidates,
-  prices, review insights, sources, and recommendations
+- Gemini integration and image/product identification in `src/lib/ai/**`
+- Multi-image reasoning, identification evidence, and uncertainty handling
+- Google Lens, candidate verification, and Google Shopping in `src/lib/search/**`
+  and `src/lib/products/**`
+- Price/offer normalization and comparison logic
+- Review discovery, evidence processing, summarization, and recommendations
+- Caching, provider implementations, and backend orchestration
+- API functionality in `src/app/api/**` and server-side API helpers
+- Backend, unit, and integration tests
+
+Avoid modifying presentation components unless required for a shared contract.
+Keep external services behind the existing provider/service interfaces and
+preserve mock mode. Existing `TODO(Vision)`, `TODO(Shopping)`, and `TODO(Reviews)`
+tags all belong to Architecture. Shared schemas, types, API contracts, and provider interfaces
+remain subject to the shared-contract rules below.
+
+### 2. UI — `feature/ui`
+
+Primary ownership:
+
+- Visual design, responsive behavior, `src/components/**`, and frontend pages/layouts
+- Upload, drag-and-drop, camera, image previews, and multi-image UX
+- Loading/error states and uncertainty flow presentation
+- Candidate selection UI and the product dashboard
+- Price comparison, review, recommendation, and source presentation
+- Accessibility, animations/interactions, and theme behavior
+- Frontend and browser tests
 
 Consume shared types and service/API contracts rather than redefining them.
+Continue using existing mock providers; do not implement external API integrations.
 Keep provider credentials and external service calls out of client components.
-Frontend ownership does not include API route contracts or backend business
-logic merely because they live under `src/app/`.
+UI ownership does not include API routes or backend business logic merely because
+these live under `src/app/`.
 
-### 2. Vision / Identification
-
-Primary ownership:
-
-- Identification modules in `src/lib/ai/**`
-- Gemini client and multimodal product identification integration
-- Image analysis, visible text/OCR, model/SKU clues, and identification evidence
-- Uncertainty handling, requests for another useful image, and multi-image
-  identification
-
-Do not modify frontend components unless explicitly required. Review analysis
-and recommendation modules within `src/lib/ai/**` belong to Reviews /
-Recommendation. Treat a Gemini client or provider interface used by both
-workstreams as shared infrastructure; coordinate changes to it.
-
-### 3. Shopping / Product Search
-
-Primary ownership:
-
-- `src/lib/search/lens*`
-- `src/lib/search/shopping*`
-- `src/lib/products/**`
-- Candidate discovery and verification
-- Product normalization and matching exact models and variants
-- Price retrieval, offer matching, and condition-aware comparisons
-
-Do not modify unrelated AI or frontend modules. Expose candidate verification
-through agreed service contracts so Identification can consume it without
-depending on shopping internals.
-
-### 4. Reviews / Recommendation
-
-Primary ownership:
-
-- Review discovery/search modules, including Google Search and Reddit discovery
-- Review evidence processing and source attribution
-- Review summarization and analysis modules, including those in `src/lib/ai/**`
-- Evidence-grounded recommendation generation
-
-Do not modify unrelated shopping or frontend modules. Consume the shared Gemini
-client/provider interface rather than creating a separate configuration or
-changing identification internals.
-
-Each workstream owns its relevant tests and dedicated mock implementations and
-fixtures. Shared mock selection, configuration, caching, and orchestration need
-coordination. If ownership is ambiguous, resolve it before changing the disputed
+Architecture owns mock service implementations and fixtures; UI consumes them
+through the existing API contracts. Coordinate changes to shared configuration
+and contracts. If ownership is ambiguous, resolve it before changing the disputed
 implementation; continue independent work in your assigned scope.
 
 ## Shared files and contracts
@@ -171,10 +149,8 @@ selection centralized and retain the ability to run without real API keys.
 
 Use one feature branch per workstream as a starting convention:
 
-- Frontend: `feature/frontend`
-- Vision / Identification: `feature/vision`
-- Shopping / Product Search: `feature/shopping`
-- Reviews / Recommendation: `feature/reviews`
+- Architecture: `feature/architecture`
+- UI: `feature/ui`
 
 Use separate checkouts or worktrees when agents work concurrently so branch
 switches and working-tree edits do not interfere. Each agent should commit only

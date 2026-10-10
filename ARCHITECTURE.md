@@ -41,16 +41,16 @@ substitutes mock data.
 The intended live pipeline is Gemini multimodal reasoning across all submitted
 images -> hypothesis, OCR and distinguishing features -> Lens candidates ->
 identity/model/variant verification -> confirmed result or a useful follow-up
-image request. `src/lib/ai/identification.ts` is the Vision extension point.
-`src/lib/search/lens.ts` and `src/lib/products/verification.ts` are Shopping
-extension points. Shared Gemini initialization is in `src/lib/ai/client.ts`.
+image request. `src/lib/ai/identification.ts` is the Architecture identification extension point.
+`src/lib/search/lens.ts` and `src/lib/products/verification.ts` are Architecture
+search/verification extension points. Shared Gemini initialization is in `src/lib/ai/client.ts`.
 The initial setup creates the SDK client lazily but makes no live model calls.
 
 All images contributing to the current identity are resubmitted together. No
 session database or permanent upload storage is used. Image counts, MIME types,
 sizes, and file signatures are checked on the server and UX limits on the client.
 The client releases preview URLs on removal/reset/unmount. Image analysis is
-not cached or logged. Lens requires a reachable image URL; the Shopping owner
+not cached or logged. Lens requires a reachable image URL; the Architecture owner
 must agree on a temporary, privacy-conscious transport before enabling it.
 
 The deterministic demo ignores image content. In the confirm scenario one image
@@ -75,7 +75,7 @@ keys; `offers.ts` provides condition/currency grouping and safe price sorting.
 Review Search retrieves source links/snippets; Review Analysis consumes evidence
 through its interface and must separate source statements from interpretation.
 No invented opinions, statistics, or citations. Empty evidence produces a clear
-insufficiency state. Both live review modules are TODOs for Reviews.
+insufficiency state. Both live review modules are TODOs for Architecture.
 
 ## Cache and API efficiency
 
@@ -97,8 +97,12 @@ owned by application services. No user images or secrets are persisted.
 
 ## Workstreams
 
-Follow AGENTS.md. Frontend owns components/pages; Vision owns identification and
-the Gemini client; Shopping owns Lens, Shopping, candidate verification and
-normalization; Reviews owns source discovery, analysis and recommendations.
-Provider interfaces, schemas, configuration and API contracts are shared.
-Keep adapters behind the existing interfaces so mock mode remains usable.
+Follow AGENTS.md. `feature/architecture` owns identification/Gemini, multi-image
+reasoning/uncertainty, Lens/Shopping, verification/offers, review evidence and
+recommendations, caching/providers/orchestration/APIs, and backend/unit/integration
+tests. `feature/ui` owns components/pages, upload/camera and multi-image UX,
+dashboard and uncertainty presentation, accessibility/interactions/theme, and
+frontend/browser tests. UI uses existing mocks and does not implement external
+integrations; Architecture avoids presentation changes unless required for a
+shared contract. Provider interfaces, schemas, configuration and API contracts
+remain shared. Keep adapters behind existing interfaces so mock mode stays usable.
