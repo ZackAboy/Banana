@@ -1,0 +1,65 @@
+{
+  "search_parameters": {
+    "engine": "google",
+    "q": "Sony DualSense Wireless Controller problems reddit",
+    "country": "us",
+    "hl": "en"
+  },
+  "organic_results": [
+    {
+      "position": 1,
+      "title": "PS5 Controller Issues : r/PS5",
+      "link": "https://www.reddit.com/r/PS5/comments/kpxzma/ps5_controller_issues/",
+      "snippet": "Hi all, I have this issue with both my dualsense controllers where the controller automatically moves to the left continuously."
+    },
+    {
+      "position": 2,
+      "title": "DualSense stops responding with PS5 but it's still connected",
+      "link": "https://www.reddit.com/r/Dualsense/comments/1d9pyon/dualsense_stops_responding_with_ps5_but_its_still/",
+      "snippet": "Remove the paired DualSense completely from the Accessories · Turn off and on the PS5 · Plug the DualSense with the original USB cable to the PS5."
+    },
+    {
+      "position": 3,
+      "title": "How to troubleshoot DualSense wireless controller issues",
+      "link": "https://www.playstation.com/en-gb/support/hardware/troubleshoot-dualsense/",
+      "snippet": "If you're having issues with your controller, try resetting it. Turn off your PlayStation®5 console. Button or analogue stick issue Vibration issue Pairing ..."
+    },
+    {
+      "position": 4,
+      "title": "New ps5 controller won't work wirelessly on pc. Can' ...",
+      "link": "https://www.reddit.com/r/Dualsense/comments/1pl50me/new_ps5_controller_wont_work_wirelessly_on_pc/",
+      "snippet": "I replaced the joysticks in my PS5 controller with Hall effect sticks, and now it won't turn on. r/Dualsense - I replaced the joysticks in my ..."
+    },
+    {
+      "position": 5,
+      "title": "Problems with my PS5 controller after only a month",
+      "link": "https://www.reddit.com/r/Dualsense/comments/1b0siag/problems_with_my_ps5_controller_after_only_a_month/",
+      "snippet": "The touch pad is pressing by itself now, Problems with my PS5 controller after only a month … it's kind of offputting. Personally ide lubricate ..."
+    },
+    {
+      "position": 6,
+      "title": "Freshly purchased, new PS5 controller turns off almost instantly ...",
+      "link": "https://www.reddit.com/r/linux_gaming/comments/1na23gz/freshly_purchased_new_ps5_controller_turns_off/",
+      "snippet": "Video shows that your cable doesn't support the dualsense, if it's connected over cable the lights are solid and do not respond to the PS button ...",
+      "thumbnail": "https://serpapi.com/searches/6aca9da3e396ebef9a91ca36/images/PPSutz52yoFoKmzCrTwwBZ4U-yEgq5uSEH3xFhOvAf8.jpeg"
+    },
+    {
+      "position": 7,
+      "title": "weird issue when using Dualsense Ps5 controller on pc via ...",
+      "link": "https://www.reddit.com/r/techsupport/comments/1pa1vqb/weird_issue_when_using_dualsense_ps5_controller/",
+      "snippet": "playing for some time it disconnects and I cant re-pair the dualsense again. The fix is to remove it from known devices in bluetooth settings"
+    },
+    {
+      "position": 8,
+      "title": "PS5 Dualsense edge controller issue",
+      "link": "https://www.reddit.com/r/Controller/comments/1pqkeln/ps5_dualsense_edge_controller_issue/",
+      "snippet": "Started having issues with my controller about 2 months ago. While playing COD, my controller started randomly making my guy look left or ..."
+    },
+    {
+      "position": 9,
+      "title": "PS5 controller is on but completely unresponsive",
+      "link": "https://www.reddit.com/r/playstation/comments/15jf54r/ps5_controller_is_on_but_completely_unresponsive/",
+      "snippet": "Use a pin or other tool to press and hold the reset button for at least five seconds. Then reconnect the controller to the console. Check for ..."
+    }
+  ]
+}
