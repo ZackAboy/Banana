@@ -5,8 +5,9 @@
 A Banana Hacks visual shopping assistant that turns a product photo into an
 identity, matching offers, review evidence, and a concise purchasing perspective.
 When the exact product is unclear, it requests another useful photo instead of
-pretending to know. The starter is a complete **synthetic demo**; live integrations
-are deliberately unfinished and never silently fall back to fake data.
+pretending to know. The default is a complete **synthetic demo**. Live Gemini
+product identification is implemented; other live integrations remain unfinished.
+Live failures never silently fall back to fake data.
 
 ## Start locally
 
@@ -49,7 +50,8 @@ Uploads allow 4 images, 3 MB per file, and 4 MB total. The aggregate limit leave
 room under Vercel's function payload limit. Browser previews use transient object
 URLs; the server processes files in memory and never permanently stores them.
 It checks MIME, size, count, aggregate size, and file signatures. Full image
-normalization/decoding should be added by Architecture before accepting live workloads.
+normalization/decoding remains future Architecture work; Gemini rejects files
+that pass signature checks but cannot actually be decoded.
 
 ## Stack and structure
 
@@ -120,15 +122,70 @@ Names are configurable and not hardcoded in adapters. Never use `NEXT_PUBLIC_`
 for API keys. `.env.local`, other environment files, and deployment state are
 ignored; only `.env.example` is intended for version control.
 
-Explicit live mode checks that both keys and model settings exist, then returns
-`501 PROVIDER_NOT_IMPLEMENTED` for unfinished adapters. Missing configuration
-returns 503. The official Gemini SDK is installed and lazy client initialization
-is provided; no external calls are made in this starter.
+Explicit live mode requires only `GEMINI_API_KEY` and `GEMINI_VISION_MODEL` for
+identification. Missing or inaccessible configuration returns 503; rate limits
+return 429; Gemini request failures and malformed/schema-invalid, blocked, or
+truncated output return safe 502 errors. Unfinished adapters still return
+`501 PROVIDER_NOT_IMPLEMENTED`. SerpApi and the text model are reserved for later
+milestones and are optional here.
+
+## Perform one real Gemini identification locally
+
+1. Use Node 24 (`nvm use`) and install dependencies (`npm ci`) if needed.
+2. Copy `.env.example` to `.env.local` **only if `.env.local` does not already
+   exist**. Edit these server-only settings in `.env.local`:
+
+   ```dotenv
+   USE_MOCK_SERVICES=false
+   GEMINI_API_KEY=your-real-key
+   GEMINI_VISION_MODEL=gemini-2.5-flash
+   ```
+
+   Use a multimodal model supporting JSON structured output that is available
+   to your key. The model above is an example, not an adapter default. No
+   `SERPAPI_API_KEY` or `GEMINI_TEXT_MODEL` is needed. Never commit `.env.local`.
+
+3. Start (or restart after editing configuration) with `npm run dev`.
+4. In another terminal, send **one** request with an actual local product photo
+   and a clear label photo of the same product (replace both paths):
+
+   ```sh
+   curl --fail-with-body --silent --show-error \
+     -F 'images=@/absolute/path/product-front.jpg;type=image/jpeg' \
+     -F 'images=@/absolute/path/product-label.jpg;type=image/jpeg' \
+     http://localhost:3000/api/identify
+   ```
+
+   For a single-photo test omit the second `-F` line. Use JPEG, PNG, or WebP
+   with its matching MIME type, at most four files, 3 MB each and 4 MB total.
+   Both images are analyzed together in one Gemini call, with automatic retries
+   disabled and a 60-second timeout. This manual call consumes real Gemini quota.
+
+5. Inspect `{ identification, meta }`: `meta.mode` must be `live`, with a null
+   notice. Inspect faithful `visibleText`, observed `distinguishingFeatures`,
+   `reasoning`, status, and `suggestedNextImage`. A readable exact model label can
+   support confirmation; ambiguous images should remain likely/uncertain.
+   `candidates` is empty in this milestone. Error responses retain the existing
+   `{ error: { code, message } }` envelope and never contain mock results.
+
+The provider uses the installed official Google Gen AI SDK's `generateContent`,
+inline image data, and [JSON structured output](https://ai.google.dev/gemini-api/docs/structured-output).
+The private response schema is derived from the existing Zod identification
+schema plus image-indexed evidence. Zod validates the response before an evidence
+policy can downgrade unsupported confirmation or conflicting views; it never
+upgrades a cautious result using numeric confidence. Likely/uncertain results
+always include a useful next photo request. Perception and semantic uniqueness
+of visual clues still depend on Gemini and are not independent verification.
+
+Use the endpoint directly for this milestone: the existing UI may automatically
+request prices/reviews after confirmation, and those live adapters still return 501. No UI changes are required for the identification contract. Automated tests
+mock SDK/model calls, require no key, and consume no Gemini quota. Return to the
+demo by setting `USE_MOCK_SERVICES=true` and restarting the server.
 
 ## Remaining live work
 
-- **Architecture (`feature/architecture`):** structured Gemini multimodal/OCR
-  reasoning and uncertainty; SerpApi Lens/Shopping, temporary image transport,
+- **Architecture (`feature/architecture`):** evaluate Gemini identification on
+  real product photos; SerpApi Lens/Shopping, temporary image transport,
   candidate/model/variant verification and normalized offers; review discovery,
   evidence processing, summarization and recommendations; caching, providers,
   backend orchestration/APIs, and backend/unit/integration tests.

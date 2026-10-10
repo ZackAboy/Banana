@@ -121,7 +121,6 @@ describe("API demo integration", () => {
     ])
       vi.stubEnv(key, "test-placeholder");
     for (const response of [
-      await identify(upload()),
       await prices(new Request(`http://localhost/api/prices?${query}`)),
       await reviews(new Request(`http://localhost/api/reviews?${query}`)),
     ]) {
