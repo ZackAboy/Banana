@@ -1,0 +1,181 @@
+# Banana Lens
+
+**Take a photo. Know what it is. Know what it’s worth.**
+
+A Banana Hacks visual shopping assistant that turns a product photo into an
+identity, matching offers, review evidence, and a concise purchasing perspective.
+When the exact product is unclear, it requests another useful photo instead of
+pretending to know. The starter is a complete **synthetic demo**; live integrations
+are deliberately unfinished and never silently fall back to fake data.
+
+## Start locally
+
+Use **Node 24 LTS** (`.nvmrc`; compatible Node 22.22.2+ is also supported).
+
+```sh
+nvm use
+npm ci
+cp .env.example .env.local
+npm run dev
+```
+
+Open <http://localhost:3000>. No credentials or paid services are needed in demo
+mode. If your system npm fails during peer resolution, use a current npm release
+with the supported Node version. Dependencies are pinned in `package.json` and
+`package-lock.json`.
+
+## Try the demo
+
+1. Upload/drag in a JPEG, PNG or WebP, or use **Use camera** on a supported device.
+2. Choose **Identify the sample product** and analyze to see the sample LG monitor,
+   illustrative offers, sample review intelligence, sources, and recommendation.
+3. Start over and choose **Ask for another image first**. One photo returns a
+   likely product and requests the rear model label. Add another photo and
+   analyze all images, or explicitly select the sample candidate.
+4. Toggle light/dark appearance; the initial theme follows your system.
+
+The demo ignores image content and always uses the documented sample product.
+All evidence, prices, retailers, and opinions are synthetic fixtures. Offer/review
+links point to `example.com` placeholders; the candidate link goes to the sample
+manufacturer page. No actual Reddit opinions or current prices have been fetched.
+The app announces demo mode and labels synthetic results throughout the UI.
+
+Uploads allow 4 images, 3 MB per file, and 4 MB total. The aggregate limit leaves
+room under Vercel's function payload limit. Browser previews use transient object
+URLs; the server processes files in memory and never permanently stores them.
+It checks MIME, size, count, aggregate size, and file signatures. Full image
+normalization/decoding should be added by Vision before accepting live workloads.
+
+## Stack and structure
+
+Next.js 16 App Router, React 19, strict TypeScript, Tailwind CSS 4, locally owned
+shadcn/ui Button/Card/Badge primitives, Radix Slot, Lucide React, Zod,
+official `@google/genai` SDK, Vitest, ESLint, Prettier, npm, and Playwright.
+`components.json` is ready for additional shadcn/ui components. No auth, database,
+Redis, Docker, Python server, or background workers.
+
+```text
+src/
+  app/                  Pages, layout, styles and thin API route handlers
+  components/           Upload, identification, prices, reviews, recommendation, UI
+  schemas/              Runtime domain and API validation; source of shared types
+  types/                TypeScript types inferred from schemas
+  lib/
+    ai/                 Gemini client, identification and review-analysis adapters
+    search/             Lens, Shopping and review-search adapters
+    products/           Verification, normalization and offer sorting
+    providers/          Shared interfaces and explicit mock/live selection
+    services/           Application coordination and cached price/review workflows
+    mock/               Dedicated synthetic fixtures and provider implementations
+    cache/              Bounded in-memory TTL cache and in-flight deduplication
+    config/             Server environment/model configuration
+    api/                Client validation, bounded requests, server error handling
+    upload.ts           Shared upload limits and validation helpers
+tests/                  Schema, utility, cache and API tests; browser demo tests
+```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for complete data flow, evidence reasoning,
+verification, multi-image support, caching, and service boundaries. See
+[AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md) before team changes.
+[HANDOFF.md](HANDOFF.md) records validation, shared contracts, exact files, and
+remaining integration work.
+
+## API contracts
+
+Successful responses include `meta: { mode: "mock" | "live", notice: string | null }`.
+Errors use `{ error: { code: string, message: string } }`. All responses are
+`Cache-Control: no-store`; application services own caching.
+
+| Route                       | Request                                                                            | Response                   |
+| --------------------------- | ---------------------------------------------------------------------------------- | -------------------------- |
+| `POST /api/identify`        | Multipart repeated `images` files, optional `scenario` (`confirmed` / `follow-up`) | `{ identification, meta }` |
+| `POST /api/products/verify` | JSON `{ candidateId, identification }`                                             | `{ identification, meta }` |
+| `GET /api/prices`           | `brand`, `productName`, `modelNumber`, `variant` query                             | `{ offers, meta }`         |
+| `GET /api/reviews`          | Same product query                                                                 | `{ insights, meta }`       |
+
+The frontend only fetches prices/reviews after confirmation and requires an exact
+model number. It runs the requests concurrently with independent errors/retries.
+The APIs are stateless: product queries are not proof of prior identification;
+live adapters must verify result relevance themselves. `/api/analyze` is optional
+and omitted to keep the starter simple.
+
+## Environment
+
+| Variable              | Purpose                                                 |
+| --------------------- | ------------------------------------------------------- |
+| `USE_MOCK_SERVICES`   | `true` (default): explicit demo; `false`: live adapters |
+| `GEMINI_API_KEY`      | Server-only Gemini credential                           |
+| `GEMINI_VISION_MODEL` | Centralized multimodal model selection                  |
+| `GEMINI_TEXT_MODEL`   | Centralized summarization model selection               |
+| `SERPAPI_API_KEY`     | Server-only Lens, Shopping, Search credential           |
+
+`.env.example` contains illustrative `gemini-2.5-flash` model settings; validate
+availability against the [Gemini model catalog](https://ai.google.dev/gemini-api/docs/models).
+Names are configurable and not hardcoded in adapters. Never use `NEXT_PUBLIC_`
+for API keys. `.env.local`, other environment files, and deployment state are
+ignored; only `.env.example` is intended for version control.
+
+Explicit live mode checks that both keys and model settings exist, then returns
+`501 PROVIDER_NOT_IMPLEMENTED` for unfinished adapters. Missing configuration
+returns 503. The official Gemini SDK is installed and lazy client initialization
+is provided; no external calls are made in this starter.
+
+## Remaining live work
+
+- **Vision:** structured Gemini multimodal/OCR output, accumulate evidence, call
+  public candidate search/verification services, preserve uncertainty.
+- **Shopping:** SerpApi Lens and Shopping adapters, agree on temporary reachable
+  image transport for Lens, verify exact model/variant before returning offers.
+- **Reviews:** SerpApi Google Search/Reddit discovery, evidence extraction,
+  Gemini text summarization/recommendation with attribution and empty states.
+- **Frontend:** refine UX against live services through the existing schemas.
+
+Each adapter has an owner-tagged TODO. Keep external calls server-side and behind
+the interfaces in `src/lib/providers/interfaces.ts`. Preserve mocks and explicit
+failure handling. Free quotas, regional/model availability, and provider terms
+vary; this starter never requires paid usage. Check the [Gemini rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)
+and [SerpApi documentation](https://serpapi.com/search-api) before enabling calls.
+Lens needs a publicly reachable image URL; no upload hosting is provisioned here.
+
+A bounded five-minute process-local cache deduplicates identical price/review
+queries (including brand/model/variant and mode). Images/identification aren't
+cached. Cache resets on restarts and is not shared across Vercel instances.
+No searches run ahead of sufficiently established identity in the UI.
+
+## Commands and verification
+
+```sh
+npm run dev           # Local development
+npm run build         # Production build (webpack, no remote fonts needed)
+npm start             # Serve a completed production build
+npm run typecheck     # Strict TypeScript check
+npm run lint          # Next/React/TypeScript lint
+npm test              # Vitest schema/utility/cache/API integration tests
+npm run test:watch
+npm run format:check
+npm run format
+npx playwright install chromium  # Once, for browser tests
+npm run test:e2e       # Starts production server if needed; run build first
+```
+
+Browser tests cover the confirmed demo, additional-image flow, candidate choice,
+mobile layout, appearance toggle, invalid input/removal, and independent review
+failure/retry. They do not validate actual camera hardware or external providers.
+Playwright screenshots/traces stay in ignored `test-results/`.
+
+Known tooling limitation: ESLint 9 is pinned because the current React/import/
+accessibility plugins in Next's configuration do not declare ESLint 10 support.
+`npm audit` currently reports a high-severity `braces` advisory through Next's
+**development-only lint dependency chain**; no patched `braces` release is
+available in the current registry. Do not force-downgrade Next to npm's suggested
+old major. Recheck before upgrading tooling. No application runtime audit
+findings were present in the initial verification; rerun `npm audit --omit=dev`
+for the current dependency state.
+
+## Vercel
+
+Import the repository in Vercel using the Next.js preset, select Node 24 (or
+supported Node 22), and set `USE_MOCK_SERVICES=true` for the demo. Use the default
+install command (`npm ci`) and `npm run build`. No credentials are needed for the
+mock deployment. There is no permanent image storage and no database migration.
+This setup is deployable but has not been published to a Vercel account.
