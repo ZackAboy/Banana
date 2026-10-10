@@ -1,7 +1,7 @@
 # Coding agent guide
 
 This repository is an AI-powered visual shopping assistant for Banana Hacks.
-Developers and their coding agents work in two primary development workstreams
+Developers and their coding agents work in three independent evidence workstreams
 through stable contracts with minimal merge conflicts. These instructions apply
 throughout the repository.
 
@@ -20,48 +20,49 @@ module already exists.
 
 ## Workstreams
 
-### 1. Architecture — `feature/architecture`
+The previous Architecture and UI workstreams are merged and retired. This task
+establishes a shared baseline on `main`; subsequent development uses these branches.
 
-Primary ownership:
+### OCR — `feature/vision-ocr`
 
-- Gemini integration and image/product identification in `src/lib/ai/**`
-- Multi-image reasoning, identification evidence, and uncertainty handling
-- Google Lens, candidate verification, and Google Shopping in `src/lib/search/**`
-  and `src/lib/products/**`
-- Price/offer normalization and comparison logic
-- Review discovery, evidence processing, summarization, and recommendations
-- Caching, provider implementations, and backend orchestration
-- API functionality in `src/app/api/**` and server-side API helpers
-- Backend, unit, and integration tests
+Owns Python OCR modules in `vision-service/app/services/ocr*`, OCR schemas/model
+loading modules and OCR-specific tests: PaddleOCR, text detection/recognition,
+identifier/model/SKU/part-number extraction, and text normalization.
+Must not implement Gemini, visual retrieval, external search, or UI redesign.
 
-Avoid modifying presentation components unless required for a shared contract.
-Keep external services behind the existing provider/service interfaces and
-preserve mock mode. Existing `TODO(Vision)`, `TODO(Shopping)`, and `TODO(Reviews)`
-tags all belong to Architecture. Shared schemas, types, API contracts, and provider interfaces
-remain subject to the shared-contract rules below.
+### Visual retrieval — `feature/visual-retrieval`
 
-### 2. UI — `feature/ui`
+Owns Python retrieval modules in `vision-service/app/services/retrieval*`, retrieval
+schemas/model loading modules and retrieval-specific tests: SigLIP/CLIP investigation,
+product/candidate image embeddings, similarity calculations and candidate ranking.
+Must not implement OCR, Gemini, external search, or UI redesign. Candidate discovery
+is Product Search ownership; consume agreed candidate/image inputs.
 
-Primary ownership:
+### Product search — `feature/product-search`
 
-- Visual design, responsive behavior, `src/components/**`, and frontend pages/layouts
-- Upload, drag-and-drop, camera, image previews, and multi-image UX
-- Loading/error states and uncertainty flow presentation
-- Candidate selection UI and the product dashboard
-- Price comparison, review, recommendation, and source presentation
-- Accessibility, animations/interactions, and theme behavior
-- Frontend and browser tests
+Owns external candidate retrieval, general/product search, Lens where useful,
+product candidate normalization, external verification, and later price-shopping
+adapters in `src/lib/search/**` and `src/lib/products/**`. Review intelligence is
+not assigned to this branch. Lens is a candidate/verification source, never the
+sole identification mechanism. Must not implement OCR, embeddings, Gemini, or UI
+redesign. Agree on temporary image transport before external image searches.
 
-Consume shared types and service/API contracts rather than redefining them.
-Continue using existing mock providers; do not implement external API integrations.
-Keep provider credentials and external service calls out of client components.
-UI ownership does not include API routes or backend business logic merely because
-these live under `src/app/`.
+### Shared integration and deferred work
 
-Architecture owns mock service implementations and fixtures; UI consumes them
-through the existing API contracts. Coordinate changes to shared configuration
-and contracts. If ownership is ambiguous, resolve it before changing the disputed
-implementation; continue independent work in your assigned scope.
+Gemini remains one semantic source. `src/lib/identification/fusion.ts` owns the
+initial evidence-adjudication boundary; future fusion work combines independent
+Gemini, OCR, retrieval, and external verification signals into the existing
+`ProductIdentification`. No dedicated fusion branch is created yet. Coordinate
+changes to this module, `src/lib/ai/**`, orchestration/APIs and provider/configuration
+contracts with maintainers before integration. UI and reviews remain maintained
+but have no new implementation assignment. `TODO(Fusion)` and `TODO(Reviews)`
+are deferred maintainer work; `TODO(ProductSearch)` belongs to Product Search.
+YOLO/object detection is explicitly deferred.
+
+The Python entrypoint, health endpoint and `pyproject.toml` are shared. Add separate
+OCR and retrieval modules/tests; do not independently redesign the service or
+add heavyweight dependencies to the common default install. Coordinate model
+extras, Python version constraints and inference transport contracts first.
 
 ## Shared files and contracts
 
@@ -140,6 +141,10 @@ Identification       Shopping              Reviews
                  Shared Domain Types
 ```
 
+The target identification pipeline collects independent semantic/OCR/retrieval signals,
+fuses evidence into candidates, and applies external verification. See
+ARCHITECTURE.md for the target flow and current implementation limits.
+
 Preserve these boundaries. Route handlers validate requests, invoke services,
 serialize responses, and handle errors. Cross-workstream calls use agreed public
 service/provider interfaces and shared domain types. Keep environment/model
@@ -149,8 +154,12 @@ selection centralized and retain the ability to run without real API keys.
 
 Use one feature branch per workstream as a starting convention:
 
-- Architecture: `feature/architecture`
-- UI: `feature/ui`
+- OCR: `feature/vision-ocr`
+- Visual retrieval: `feature/visual-retrieval`
+- Product search: `feature/product-search`
+
+All three branches start at the same validated shared baseline. Do not push or
+delete remote branches without an explicit publishing instruction.
 
 Use separate checkouts or worktrees when agents work concurrently so branch
 switches and working-tree edits do not interfere. Each agent should commit only

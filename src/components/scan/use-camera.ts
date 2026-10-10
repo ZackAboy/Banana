@@ -16,6 +16,7 @@ const noop = () => () => undefined;
 export function useCamera(active: boolean) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const generationRef = useRef(0);
   const [status, setStatus] = useState<CameraStatus>("off");
   const [facing, setFacing] = useState<"environment" | "user">("environment");
   const supported = useSyncExternalStore(
@@ -25,6 +26,7 @@ export function useCamera(active: boolean) {
   );
 
   const stop = useCallback(() => {
+    generationRef.current += 1;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
   }, []);
@@ -33,6 +35,7 @@ export function useCamera(active: boolean) {
     async (mode = facing) => {
       if (!navigator.mediaDevices?.getUserMedia) return;
       stop();
+      const generation = generationRef.current;
       setStatus("starting");
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -43,14 +46,19 @@ export function useCamera(active: boolean) {
           },
           audio: false,
         });
+        // Permission can resolve after unmount, cancellation, or a camera flip.
+        if (generation !== generationRef.current) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play().catch(() => undefined);
         }
-        setStatus("live");
+        if (generation === generationRef.current) setStatus("live");
       } catch {
-        setStatus("blocked");
+        if (generation === generationRef.current) setStatus("blocked");
       }
     },
     [facing, stop],

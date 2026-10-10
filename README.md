@@ -16,7 +16,7 @@ Use **Node 24 LTS** (`.nvmrc`; compatible Node 22.22.2+ is also supported).
 ```sh
 nvm use
 npm ci
-cp .env.example .env.local
+test -e .env.local || cp .env.example .env.local
 npm run dev
 ```
 
@@ -32,12 +32,12 @@ TypeScript check. See [Next.js TypeScript guidance](https://nextjs.org/docs/app/
 
 ## Try the demo
 
-1. Upload/drag in a JPEG, PNG or WebP, or use **Use camera** on a supported device.
-2. Choose **Identify the sample product** and analyze to see the sample LG monitor,
-   illustrative offers, sample review intelligence, sources, and recommendation.
-3. Start over and choose **Ask for another image first**. One photo returns a
-   likely product and requests the rear model label. Add another photo and
-   analyze all images, or explicitly select the sample candidate.
+1. Choose **Instant match** in the Demo selector, then upload/drag in a JPEG,
+   PNG or WebP, or use the shutter/gallery control. Picking a photo starts scanning.
+2. See the sample LG monitor and illustrative prices, reviews and verdict.
+3. Start a new scan and choose **Needs a label** before picking a photo. The
+   result requests a label; **Add photo** preserves existing views. Add another
+   photo to rescan all views, or explicitly select the synthetic candidate.
 4. Toggle light/dark appearance; the initial theme follows your system.
 
 The demo ignores image content and always uses the documented sample product.
@@ -50,7 +50,7 @@ Uploads allow 4 images, 3 MB per file, and 4 MB total. The aggregate limit leave
 room under Vercel's function payload limit. Browser previews use transient object
 URLs; the server processes files in memory and never permanently stores them.
 It checks MIME, size, count, aggregate size, and file signatures. Full image
-normalization/decoding remains future Architecture work; Gemini rejects files
+normalization/decoding remains future coordinated image-validation work; Gemini rejects files
 that pass signature checks but cannot actually be decoded.
 
 ## Stack and structure
@@ -59,7 +59,8 @@ Next.js 16 App Router, React 19, strict TypeScript, Tailwind CSS 4, locally owne
 shadcn/ui Button/Card/Badge primitives, Radix Slot, Lucide React, Zod,
 official `@google/genai` SDK, Vitest, ESLint, Prettier, npm, and Playwright.
 `components.json` is ready for additional shadcn/ui components. No auth, database,
-Redis, Docker, Python server, or background workers.
+Redis, Docker, or background workers. A separate optional Python health-only
+service is scaffolded; the Next.js app runs independently of it.
 
 ```text
 src/
@@ -72,6 +73,7 @@ src/
     search/             Lens, Shopping and review-search adapters
     products/           Verification, normalization and offer sorting
     providers/          Shared interfaces and explicit mock/live selection
+    identification/     Source-independent evidence adjudication boundary
     services/           Application coordination and cached price/review workflows
     mock/               Dedicated synthetic fixtures and provider implementations
     cache/              Bounded in-memory TTL cache and in-flight deduplication
@@ -79,6 +81,7 @@ src/
     api/                Client validation, bounded requests, server error handling
     upload.ts           Shared upload limits and validation helpers
 tests/                  Schema, utility, cache and API tests; browser demo tests
+vision-service/         Independent FastAPI health scaffold; no inference/models
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for complete data flow, evidence reasoning,
@@ -184,15 +187,23 @@ demo by setting `USE_MOCK_SERVICES=true` and restarting the server.
 
 ## Remaining live work
 
-- **Architecture (`feature/architecture`):** evaluate Gemini identification on
-  real product photos; SerpApi Lens/Shopping, temporary image transport,
-  candidate/model/variant verification and normalized offers; review discovery,
-  evidence processing, summarization and recommendations; caching, providers,
-  backend orchestration/APIs, and backend/unit/integration tests.
-- **UI (`feature/ui`):** refine visual design, components, responsive upload/camera
-  and multi-image UX, states and dashboard presentation, accessibility,
-  interactions/theme, and frontend/browser tests. Use existing mock providers
-  and shared contracts; do not implement external API integrations.
+- **`feature/vision-ocr`:** Python OCR/PaddleOCR, text/identifier extraction and
+  normalization, and OCR tests. No Gemini, retrieval, search or UI redesign.
+- **`feature/visual-retrieval`:** SigLIP/CLIP, product/candidate embeddings,
+  similarity and ranking, and retrieval tests. No OCR, Gemini, search or UI redesign.
+- **`feature/product-search`:** external candidates, search/Lens, candidate
+  normalization and verification, then shopping. Lens is one source rather than
+  the sole identification mechanism.
+
+Future fusion will reconcile independent Gemini, OCR, retrieval and verification
+signals behind the unchanged frontend identification contract. There is no fusion
+branch yet. YOLO is deferred. Gemini, UI and reviews require a coordinated future
+assignment. The CFI-ZCT2W cautious-status limitation and the evidence needed to
+resolve it safely are documented in ARCHITECTURE.md.
+
+The optional [vision service](vision-service/README.md) provides only `GET /health`.
+No OCR, embeddings, inference endpoints, model weights, model packages or Next.js
+service client are implemented. It is not part of the Vercel deployment.
 
 Each adapter has an owner-tagged TODO. Keep external calls server-side and behind
 the interfaces in `src/lib/providers/interfaces.ts`. Preserve mocks and explicit
@@ -204,7 +215,9 @@ Lens needs a publicly reachable image URL; no upload hosting is provisioned here
 A bounded five-minute process-local cache deduplicates identical price/review
 queries (including brand/model/variant and mode). Images/identification aren't
 cached. Cache resets on restarts and is not shared across Vercel instances.
-No searches run ahead of sufficiently established identity in the UI.
+The current UI fetches prices/reviews only after confirmation. Future internal
+candidate search can precede final identity; shopping/reviews still require a
+verified matching product.
 
 ## Commands and verification
 
@@ -229,9 +242,8 @@ Playwright screenshots/traces stay in ignored `test-results/`.
 
 Known tooling limitation: ESLint 9 is pinned because the current React/import/
 accessibility plugins in Next's configuration do not declare ESLint 10 support.
-`npm audit` currently reports a high-severity `braces` advisory through Next's
-**development-only lint dependency chain**; no patched `braces` release is
-available in the current registry. Do not force-downgrade Next to npm's suggested
+The initial `npm audit` reported a high-severity `braces` advisory through Next's
+**development-only lint dependency chain**; patch availability must be rechecked before a tooling upgrade. Do not force-downgrade Next to npm's suggested
 old major. Recheck before upgrading tooling. No application runtime audit
 findings were present in the initial verification; rerun `npm audit --omit=dev`
 for the current dependency state.

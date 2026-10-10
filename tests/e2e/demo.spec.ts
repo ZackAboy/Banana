@@ -12,6 +12,52 @@ const upload = (page: Page) =>
 const noOverflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
 
+test("camera permission resolving after scan starts releases the late stream", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const state = window as unknown as {
+      resolveCamera?: () => void;
+      cameraStopped?: boolean;
+    };
+    Object.defineProperty(navigator, "permissions", {
+      value: { query: async () => ({ state: "prompt" }) },
+    });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: {
+        getUserMedia: () =>
+          new Promise((resolve) => {
+            state.resolveCamera = () =>
+              resolve({
+                getTracks: () => [
+                  {
+                    stop: () => {
+                      state.cameraStopped = true;
+                    },
+                  },
+                ],
+              });
+          }),
+      },
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Turn on camera" }).click();
+  await page.waitForFunction(() => "resolveCamera" in window);
+  await upload(page);
+  await expect(page.getByRole("status")).toContainText(/Looking closely/);
+  await page.evaluate(() => {
+    (window as unknown as { resolveCamera: () => void }).resolveCamera();
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as unknown as { cameraStopped?: boolean }).cameraStopped,
+      ),
+    )
+    .toBe(true);
+});
+
 test("confirmed demo: camera, scanning, results and new scan", async ({
   page,
 }) => {

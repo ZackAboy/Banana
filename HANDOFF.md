@@ -1,174 +1,191 @@
-# Initial setup handoff
+# Multi-model architecture baseline handoff
 
-## Implemented
+## Starting point and merge audit
 
-- Next.js App Router/React application with strict TypeScript, Tailwind, locally
-  owned shadcn/ui primitives, Radix Slot, Lucide, Zod, official Gemini SDK,
-  Vitest, ESLint, Prettier, npm, and Playwright. Direct versions are pinned.
-- Responsive upload/drop/camera controls, transient previews, four-image support,
-  shared size limits, MIME/signature validation, bounded request bodies, loading,
-  empty/error states, light/dark appearance, and accessible controls.
-- Mock end-to-end identity, candidate verification, price comparison, review
-  evidence/sources, caveats, and purchasing recommendation.
-- Deterministic uncertain flow: one image requests a label, two images confirm
-  the sample. Candidate selection is explicitly described as a demo user choice.
-- Thin API routes with validation and sanitized error envelopes; service/provider
-  interfaces; centralized server configuration and a bounded TTL cache with
-  in-flight request deduplication. Price/review loads run concurrently after
-  confirmation and support independent failures/retries.
-- README, architecture, team workflow, environment example, and ignored secrets.
-  Existing `AGENTS.md` is retained unchanged.
+The working tree was clean on arrival. Local `main` was fast-forwarded, without
+resetting or discarding work, to `758a137447e07a647787d40a10204521a9565afa` after
+fetching/pruning origin. Git history records Architecture PR #2 at `b79f96b` and
+the latest UI PR #3 at `758a137` (plus earlier UI PR #1 at `edcd967`). Both remote
+feature tips, and both old local tips, are ancestors of updated main with no unique
+unmerged commits. The merged scanner UI and live Gemini implementation are present.
 
-## Validation completed
+The baseline commit is the commit containing this handoff; obtain its full hash
+with `git log -1 --format=%H -- HANDOFF.md`. The task's final report records the
+exact hash and branch pointers after local housekeeping. No remote writes are
+part of this baseline.
 
-| Check                    | Result                                                                                                                  |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| Dependency installation  | Passed with supported Node 24 toolchain                                                                                 |
-| `npm run typecheck`      | Passed                                                                                                                  |
-| `npm run lint`           | Passed, no warnings                                                                                                     |
-| `npm test`               | 21 tests passed across 5 files                                                                                          |
-| `npm run build`          | Production build passed, including TypeScript                                                                           |
-| `npm run test:e2e`       | 5 Chromium tests passed against production server                                                                       |
-| `npm run format:check`   | Passed                                                                                                                  |
-| Application launch       | Production server launched by Playwright and served the app                                                             |
-| Mock flow                | Confirmed, follow-up image, candidate choice, failure/retry verified                                                    |
-| Responsive appearance    | Desktop and 390px mobile screenshots reviewed; dark foreground and no horizontal overflow verified                      |
-| Runtime dependency audit | `npm audit --omit=dev`: 0 vulnerabilities                                                                               |
-| Credential checks        | No credential-pattern matches in created source/config/docs; environment files and build/dependency directories ignored |
+## Audit findings and changes
 
-Browser tests exercise uploads, preview/removal, analysis, recommendations, reset,
-mobile theme behavior, and a forced review failure followed by retry. Hardware
-camera capture, live APIs, and actual Vercel deployment have not been verified.
-No API keys were supplied or committed. No Git commit was created by this task.
+Reviewed UI/upload/camera, all-view resubmission, multipart bounds/signatures,
+identify route/service/provider selection, Gemini SDK/configuration/structured
+output, mocks, domain/API schemas, status/evidence policy and result rendering.
+Also reviewed price/review boundaries, cache/error handling and documentation.
 
-## Shared contracts introduced
+- No conflict markers, frontend/backend response-shape drift, or credential-pattern
+  matches were found in tracked application/configuration/test/documentation files.
+  Existing local environment files remain ignored and untouched. Checks are not a
+  guarantee that arbitrary secrets cannot exist.
+- Mock behavior is intentionally isolated in fixtures/providers. Live failures
+  stay typed errors; there is no fallback to synthetic success. Image limits and
+  1-based source references remain enforced. No new external operation is enabled.
+- Gemini parsing previously owned status adjudication. Extracted the same semantic
+  evidence schema into a reusable shared module and moved policy to a source-tagged
+  fusion boundary. It clones the proposal; it adds no score formula or source.
+- Fixed a camera lifecycle race: a delayed permission response after unmount/scan
+  could leave a camera stream running. Stale requests now stop their tracks and
+  cannot replace current camera state. Added an HTTP/browser lifecycle regression.
+- Replaced stale two-workstream assignments and initial-only handoff claims;
+  corrected README demo controls, preserved historical UI design notes, and
+  reassigned search/verification TODOs to Product Search. No broad styling refactor.
+- No speculative file deletion: remaining live adapter stubs and UI primitives
+  are intentional extension points, not merge artifacts.
 
-This empty repository had no previous shared contracts to preserve. Created:
+## Architecture and shared contracts
 
-- `src/schemas/domain.ts`: identification/status/candidates/offers/review schemas
-- `src/schemas/api.ts`: request/response, mode metadata and error schemas
-- `src/types/index.ts`: inferred shared domain/API types
-- `src/lib/providers/interfaces.ts`: public service/provider boundaries
-- `src/lib/config/env.ts` and `.env.example`: validated environment/model selection
-- `src/lib/upload.ts`: shared upload limits/validation
-- Four `src/app/api/**/route.ts` files: HTTP contracts documented in README
+Gemini remains one semantic source. Independent OCR and retrieval signals will
+feed fusion, then candidates and external verification, then final identity and
+prices/reviews. Lens is a candidate/verification source, not the whole pipeline.
+YOLO is deferred. No dedicated fusion branch is required yet.
 
-## Assumptions and remaining work
+Added `semanticVisionEvidenceSchema` in `src/schemas/evidence.ts`, the inferred
+`SemanticVisionEvidence` type, and the internal `SemanticVisionSignal`/`fuseEvidence`
+boundary in `src/lib/identification/fusion.ts`. The existing Gemini evidence shape
+is reused rather than duplicated. **UI-facing ProductIdentification, API envelopes,
+existing provider interfaces, environment settings and Gemini JSON shape are
+unchanged.** Future OCR/retrieval/verification representations are documented in
+ARCHITECTURE.md; no unused runtime schemas or no-op providers were introduced.
 
-The first setup is authorized to span all workstreams once. Subsequent work uses
-AGENTS.md ownership and these stable interfaces. Mock mode defaults on; images
-are not actually analyzed in the demo. Live adapters intentionally return 501,
-and missing live configuration returns 503. Real failures never return fixtures.
+Added an independent, optional FastAPI service with only `GET /health`, minimal
+runtime dependencies (FastAPI/plain Uvicorn), separate future service/model/schema
+packages and development checks. Python isolates native ML dependency/model
+lifecycles from Next.js functions. No PaddleOCR, torch, Transformers, SigLIP/CLIP,
+Ultralytics, inference code, model weights/downloads, service client, new env setting
+or deployment was added. Python is not needed to run the existing application.
+See vision-service/README.md for independent startup and validation.
 
-| Owner / branch                        | TODO and extension points                                                                                                                                                                                                                                                                                                                   |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Architecture / `feature/architecture` | Identification/Gemini/multi-image/uncertainty in `src/lib/ai/identification.ts`; Lens/Shopping in `src/lib/search`; verification and offers in `src/lib/products`; review discovery/evidence/summarization/recommendations; caching/providers/backend orchestration/APIs; backend/unit/integration tests                                    |
-| UI / `feature/ui`                     | Design/components/responsive layout, upload/camera/previews/multi-image UX, loading/errors/uncertainty/candidate/dashboard presentation, prices/reviews/recommendations/sources presentation, accessibility/interactions/theme, frontend/browser tests; consume existing mock providers and shared contracts, with no external integrations |
+## CFI-ZCT2W diagnosis and deferred resolution
 
-Identification is expected to use the public Lens/verification interfaces when
-its live pipeline is wired. Review analysis is expected to consume retrieved
-sources and shared Gemini initialization rather than duplicate configuration.
-These are declared integration assumptions, not completed live behavior.
+Reproduced the Sony DualSense case with a structured two-image fixture: the exact
+model is retained, but `likely` is never upgraded by the existing adjudication
+policy. A missing follow-up request becomes another model/SKU label request.
+This is backend policy, not a display mismatch.
 
-Known issues/limits:
+The current transcription and exact-match assessment are both Gemini-generated;
+there is no independent manufacturer-label provenance, extraction/inference
+classification, or cross-source brand/variant consistency assessment. A temporary
+agreement-based upgrade would conceal this limitation. The baseline preserves
+current behavior and adds a regression documenting it, including conflict veto.
+Future fusion must accept complete, source-supported label identifiers, check
+model/SKU/part and brand/product consistency, veto conflicts, and clear redundant
+label requests after confirmation. Numeric model confidence is never sufficient.
 
-- Prices, retailers, identity evidence, and review opinions are synthetic fixtures;
-  offer/review links are explicitly labeled example.com placeholders.
-- Lens needs temporary reachable image transport; no hosting/storage is added.
-- Upload signatures are checked; full decode/normalization is future Architecture work.
-- Cache is process-local and nondurable, with no coordination across instances.
-- Next's React/import/accessibility lint plugins currently require ESLint 9;
-  ESLint 9 is deprecated. The lint dependency chain has 5 high-severity audit
-  findings from an unpatched `braces` advisory. Runtime audit has 0 findings.
-- The host initially had Node 23/npm 10 resolver issues; verification used Node
-  24.21.0 and current npm. Use `.nvmrc` before installation/checks.
+## Validation
 
-## Integration steps
+Used Node 24.21.0 (the host default is unsupported Node 23) and Python 3.14.5.
 
-1. Review and commit this starter as the shared base; no existing source was
-   overwritten. Keep `AGENTS.md` with the base.
-2. Create a branch and separate checkout/worktree per workstream. Read architecture
-   and contracts first; coordinate shared changes in a small prerequisite PR.
-3. Replace live placeholders behind the existing interfaces and preserve explicit
-   mock mode. Run typecheck/lint/tests/build and browser checks before merging.
-4. For the demo run `npm ci`, copy `.env.example` to `.env.local`, then `npm run dev`
-   under Node 24. No credentials are required with `USE_MOCK_SERVICES=true`.
-5. Use Vercel's Next.js preset and Node 24 for a future deployment; publishing is
-   outside this setup. See README for commands, environment and provider links.
+| Check                         | Result                                                                                                    |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `npm test`                    | 66 tests passed across 6 files                                                                            |
+| `npm run typecheck`           | Passed after correcting a new test-fixture type mismatch                                                  |
+| `npm run lint`                | Passed                                                                                                    |
+| `npm run build`               | Passed, production webpack build; mock mode explicitly enabled                                            |
+| `npm run test:e2e`            | 6 Chromium tests passed against a fresh production server                                                 |
+| `npm run format:check`        | Passed                                                                                                    |
+| `git diff --check`            | Passed (working tree and staged baseline)                                                                 |
+| Python editable install       | Passed in ignored project-local virtualenv                                                                |
+| Python pytest                 | 2 passed; upstream Starlette warning about deprecated httpx TestClient support                            |
+| Python Ruff lint/format       | Passed                                                                                                    |
+| Python dependency consistency | `pip check` passed                                                                                        |
+| Python standalone startup     | Uvicorn started; HTTP `/health` returned 200 and `{"status":"ok"}`; server stopped                        |
+| Python static typecheck       | Not configured; not run                                                                                   |
+| `npm audit --omit=dev`        | Zero vulnerabilities                                                                                      |
+| Full `npm audit`              | Five existing high findings in the Next lint dependency chain (`braces`); no dependency rewrite attempted |
 
-## Exact files created in this task
+The first browser attempt could not launch because the required Chromium binary
+was absent. Installed the matching Playwright Chromium, FFmpeg and headless shell,
+then reran. No application behavior had executed in that first attempt. Live
+Gemini network calls, physical camera hardware and deployment were not tested;
+Gemini/HTTP live-mode tests mock the SDK and consume no quota.
 
-- `.env.example`
+## Ownership, assumptions and integration order
+
+1. Start all three local branches at the final validated main baseline; use separate
+   worktrees for concurrent development. Do not switch this checkout underneath a
+   developer or independently redesign shared service files.
+2. OCR owns text/identifier extraction and normalization. Retrieval owns embeddings,
+   similarity and ranking. Product Search owns external candidates, normalization,
+   verification and later shopping. Each branch adds separate modules and tests.
+3. Coordinate inference request/error schemas, image ordering/bounds, raw evidence
+   provenance and shared cross-language fixtures before connecting Python to Next.js.
+   Coordinate dependency extras, supported Python versions and reproducible locks
+   before installing ML packages. No model installation is required to begin design.
+4. Future fusion is maintainer-coordinated (`TODO(Fusion)`); UI, Gemini improvements
+   and review intelligence need separate assignments. Assumption: these are outside
+   the three new branches except necessary agreed shared integration changes.
+5. Product Search must agree on temporary reachable image transport before Lens.
+   Current public provider interfaces and ProductCandidate should be reused where
+   possible; source adapters do not decide final confirmation.
+
+Nonblocking limits to address before enabling new live paths:
+
+- The CFI-ZCT2W upgrade limitation and Gemini-only visual uniqueness assessment
+  remain. Two model-reported features are not independent model/provider evidence.
+- Live prices/reviews/candidate verification remain explicit 501 responses. The
+  UI may request prices/reviews after live confirmation; errors remain visible.
+- The camera screen's Demo selector is shown in live mode too, though the live
+  provider ignores it and returned mode metadata remains accurate. Future UI work
+  should make the initial mode presentation explicit.
+- Offer sorting groups currency/condition, but the UI's highlighted lowest offer
+  compares conditions within one currency. Coordinate grouping/labels before live
+  shopping; do not present used/refurbished as equivalent to new.
+- Global live configuration currently requires Gemini even for other provider
+  operations. Revisit operation-specific validation when independent sources wire
+  in; do not make Python or new credentials mandatory for existing Gemini/demo use.
+- Upload signatures are checked but full decode/normalization is deferred. Images
+  are memory-only; cache is process-local and nondurable. Python has no hosting or
+  inference transport/authentication/readiness policy yet.
+- Development lint audit findings and the Python TestClient deprecation warning
+  are documented tooling follow-ups. Runtime npm audit is clean.
+
+No remaining issue blocks starting isolated workstream development after the
+baseline checks pass. Shared integration decisions above precede live wiring.
+
+## Exact files changed
+
 - `.gitignore`
-- `.nvmrc`
 - `.prettierignore`
-- `.prettierrc.json`
+- `AGENTS.md`
 - `ARCHITECTURE.md`
 - `CONTRIBUTING.md`
 - `HANDOFF.md`
 - `README.md`
-- `components.json`
+- `docs/ui-flow.md`
 - `eslint.config.mjs`
-- `next-env.d.ts`
-- `next.config.ts`
-- `package-lock.json`
-- `package.json`
-- `playwright.config.ts`
-- `postcss.config.mjs`
-- `src/app/api/identify/route.ts`
-- `src/app/api/prices/route.ts`
-- `src/app/api/products/verify/route.ts`
-- `src/app/api/reviews/route.ts`
-- `src/app/error.tsx`
-- `src/app/globals.css`
-- `src/app/layout.tsx`
-- `src/app/not-found.tsx`
-- `src/app/page.tsx`
-- `src/components/identification/candidate-products.tsx`
-- `src/components/identification/identification-evidence.tsx`
-- `src/components/identification/product-identity-card.tsx`
-- `src/components/prices/price-comparison.tsx`
-- `src/components/product/demo-preview.tsx`
-- `src/components/recommendation/recommendation-card.tsx`
-- `src/components/reviews/review-insights.tsx`
-- `src/components/reviews/sources.tsx`
-- `src/components/shopping-assistant.tsx`
-- `src/components/theme-toggle.tsx`
-- `src/components/ui/badge.tsx`
-- `src/components/ui/button.tsx`
-- `src/components/ui/card.tsx`
-- `src/components/upload/image-upload.tsx`
-- `src/lib/ai/client.ts`
-- `src/lib/ai/identification.ts`
-- `src/lib/ai/reviews.ts`
-- `src/lib/api/client.ts`
-- `src/lib/api/http.ts`
-- `src/lib/api/identify-input.ts`
-- `src/lib/cache/memory.ts`
-- `src/lib/config/env.ts`
-- `src/lib/errors.ts`
-- `src/lib/mock/fixtures.ts`
-- `src/lib/mock/providers.ts`
-- `src/lib/products/normalization.ts`
-- `src/lib/products/offers.ts`
+- `src/components/scan/use-camera.ts`
+- `src/lib/ai/identification-output.ts`
+- `src/lib/identification/fusion.ts`
 - `src/lib/products/verification.ts`
-- `src/lib/providers/index.ts`
-- `src/lib/providers/interfaces.ts`
 - `src/lib/search/lens.ts`
-- `src/lib/search/reviews.ts`
 - `src/lib/search/shopping.ts`
-- `src/lib/services/analysis.ts`
-- `src/lib/upload.ts`
-- `src/lib/utils.ts`
-- `src/schemas/api.ts`
-- `src/schemas/domain.ts`
+- `src/schemas/evidence.ts`
 - `src/types/index.ts`
-- `tests/api.test.ts`
-- `tests/cache.test.ts`
 - `tests/e2e/demo.spec.ts`
-- `tests/products.test.ts`
-- `tests/schemas.test.ts`
-- `tests/server-only.ts`
-- `tests/upload.test.ts`
-- `tsconfig.json`
-- `vitest.config.ts`
+- `tests/gemini.test.ts`
+- `vision-service/README.md`
+- `vision-service/pyproject.toml`
+- `vision-service/app/__init__.py`
+- `vision-service/app/main.py`
+- `vision-service/app/models/__init__.py`
+- `vision-service/app/schemas/__init__.py`
+- `vision-service/app/services/__init__.py`
+- `vision-service/tests/test_health.py`
+
+## Post-commit local housekeeping
+
+Only after validation and commit: recheck reachability/unique commits, remove
+local `feature/architecture` and `feature/ui` with safe `git branch -d`, create
+`feature/vision-ocr`, `feature/visual-retrieval` and `feature/product-search` at the
+same final main commit, and remain on main. Remote old branches were verified
+merged but are retained because no remote publishing/deletion was instructed.
+The local baseline must be shared through the normal reviewed publishing workflow
+before collaborators can fetch it; no push occurs in this task.

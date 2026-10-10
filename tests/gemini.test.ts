@@ -11,6 +11,8 @@ import { identifyResponseSchema } from "@/schemas/api";
 import type { ImageInput } from "@/lib/providers/interfaces";
 import type { ProductIdentification } from "@/types";
 import { MAX_IMAGE_BYTES, MAX_IMAGES } from "@/lib/upload";
+import { fuseEvidence } from "@/lib/identification/fusion";
+import { semanticVisionEvidenceSchema } from "@/schemas/evidence";
 
 const { generateContent, clientOptions } = vi.hoisted(() => ({
   generateContent: vi.fn(),
@@ -91,6 +93,50 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Gemini structured identification parsing and evidence policy", () => {
+  it("keeps CFI-ZCT2W likely pending independent manufacturer-label provenance", () => {
+    const output = modelOutput();
+    Object.assign(output.identification, {
+      brand: "Sony",
+      productName: "PlayStation 5 DualSense controller",
+      modelNumber: "CFI-ZCT2W",
+      variant: "White",
+      category: "Controller",
+      visibleText: ["Sony", "MODEL CFI-ZCT2W"],
+      distinguishingFeatures: ["White controller housing"],
+      identificationStatus: "likely",
+      suggestedNextImage: "Photograph the manufacturer model/SKU label.",
+    });
+    output.evidence.exactMatch = [
+      {
+        imageIndex: 2,
+        kind: "model_number",
+        observation: "MODEL CFI-ZCT2W",
+        interpretation:
+          "Gemini reports the rear-label model matches the controller.",
+      },
+    ];
+    const result = parseGeminiIdentification(JSON.stringify(output), 2);
+    expect(result.modelNumber).toBe("CFI-ZCT2W");
+    expect(result.identificationStatus).toBe("likely");
+    // Known limitation, not the desired final rule: see ARCHITECTURE.md.
+    output.evidence.conflictingImages = true;
+    expect(
+      parseGeminiIdentification(JSON.stringify(output), 2).identificationStatus,
+    ).toBe("uncertain");
+  });
+  it("adjudicates semantic evidence without mutating the provider proposal", () => {
+    const { identification, evidence } = modelOutput();
+    evidence.exactMatch = [];
+    expect(
+      fuseEvidence({
+        source: "gemini",
+        identification,
+        evidence: semanticVisionEvidenceSchema.parse(evidence),
+      }).identificationStatus,
+    ).toBe("likely");
+    expect(identification.identificationStatus).toBe("confirmed");
+    expect(identification.suggestedNextImage).toBeNull();
+  });
   it("parses a confirmed readable model label into the existing domain type", () => {
     expect(parseGeminiIdentification(JSON.stringify(modelOutput()), 1)).toEqual(
       modelOutput().identification,

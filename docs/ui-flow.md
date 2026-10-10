@@ -1,6 +1,7 @@
 # UI flow plan
 
-Workstream: UI (`feature/ui`). No shared contracts change.
+Historical design notes for the merged UI workstream. The branch is retired;
+current workstream ownership is in AGENTS.md. No shared contracts changed.
 
 ## Research notes
 

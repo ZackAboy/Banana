@@ -4,3 +4,7 @@ package-lock.json
 coverage
 playwright-report
 test-results
+vision-service/.venv
+vision-service/.pytest_cache
+vision-service/.ruff_cache
+**/*.egg-info

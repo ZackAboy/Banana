@@ -4,14 +4,17 @@ Read `AGENTS.md`, `ARCHITECTURE.md`, and the relevant schemas/provider interface
 before changing code. The initial setup spans all workstreams once to establish
 a stable base. Subsequent work should follow these boundaries.
 
-| Workstream   | Branch                 | Ownership                                                                                                                                                                                                                                   |
-| ------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Architecture | `feature/architecture` | Gemini, identification/uncertainty, Lens/Shopping, verification/offers, review evidence/summarization/recommendations, caching/providers/orchestration/APIs, backend/unit/integration tests                                                 |
-| UI           | `feature/ui`           | Design/components/layouts, responsive upload/camera/previews/multi-image UX, loading/errors/uncertainty/candidates, dashboard/prices/reviews/recommendations/sources presentation, accessibility/interactions/theme, frontend/browser tests |
+| Workstream       | Branch                     | Ownership                                                                      |
+| ---------------- | -------------------------- | ------------------------------------------------------------------------------ |
+| OCR              | `feature/vision-ocr`       | Python OCR, PaddleOCR, text/identifier extraction and normalization, OCR tests |
+| Visual retrieval | `feature/visual-retrieval` | SigLIP/CLIP, image embeddings, similarity and ranking, retrieval tests         |
+| Product search   | `feature/product-search`   | External candidates/search/Lens, normalization/verification, later shopping    |
 
-UI uses existing mock providers and shared contracts; it must not implement
-external API integrations. Architecture avoids presentation changes unless
-required for a shared contract.
+The previous Architecture/UI branches are retired after merging. All new branches
+start from the same clean shared baseline. Gemini, evidence fusion, UI and review
+intelligence have no new branch assignment. Coordinate shared integration with
+maintainers; do not implement another workstream or create a fusion branch yet.
+See AGENTS.md for exclusions and shared Python file ownership. YOLO is deferred.
 
 Use a separate clone or worktree for concurrent agents. Do not let agents switch
 branches in the same working directory. Avoid direct commits to `main` during
@@ -45,6 +48,11 @@ npm test
 npm run build
 npm run test:e2e
 ```
+
+For the independent health-only service, follow `vision-service/README.md` and run
+its pytest suite, Ruff lint, and Ruff formatting check. Python static type checking
+is not configured yet. Coordinate inference HTTP contracts and dependency extras
+before implementing adapters. The Next.js app does not require Python to run.
 
 Install Chromium once with `npx playwright install chromium`. Keep tests focused
 on contracts and meaningful behavior. Report checks not run and why. Verify the

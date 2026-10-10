@@ -18,3 +18,7 @@ export type ProductQuery = z.infer<typeof api.productQuerySchema>;
 export type VerifyRequest = z.infer<typeof api.verifyRequestSchema>;
 export type PricesResponse = z.infer<typeof api.pricesResponseSchema>;
 export type ReviewsResponse = z.infer<typeof api.reviewsResponseSchema>;
+
+export type SemanticVisionEvidence = z.infer<
+  typeof import("@/schemas/evidence").semanticVisionEvidenceSchema
+>;
