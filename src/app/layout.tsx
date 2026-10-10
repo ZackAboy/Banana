@@ -1,9 +1,15 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 export const metadata: Metadata = {
-  title: "Banana Lens — A little clarity before you buy",
+  title: "Banana Lens",
   description:
-    "Take a photo. Know what it is. Know what it’s worth. A visual shopping assistant with evidence, offers, and review intelligence.",
+    "Point at a product. Know what it is, what it costs, and what people think.",
+};
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#000000",
 };
 export default function RootLayout({
   children,
