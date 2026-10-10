@@ -1,5 +1,5 @@
 import { ScanText } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { order } from "@/components/ui/stagger";
 import type { ProductIdentification } from "@/types";
 export function IdentificationEvidence({
   identification: p,
@@ -7,32 +7,43 @@ export function IdentificationEvidence({
   identification: ProductIdentification;
 }) {
   return (
-    <Card>
-      <h3 className="flex items-center gap-2 font-semibold">
-        <ScanText className="size-4 text-primary" />
-        What supports this match
-      </h3>
-      <p className="mt-3 text-sm leading-6 text-muted-foreground">
-        {p.reasoning}
-      </p>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <div>
-          <h4 className="eyebrow">Visible text</h4>
-          <p className="mt-2 text-sm">
-            {p.visibleText.length
-              ? p.visibleText.join(" · ")
-              : "No readable text found."}
-          </p>
-        </div>
-        <div>
-          <h4 className="eyebrow">Distinguishing features</h4>
-          <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+    <div className="stagger space-y-6">
+      <section style={order(0)}>
+        <h3 className="mb-2.5 flex items-center gap-2 text-sm font-semibold">
+          <ScanText className="size-4" />
+          Text found
+        </h3>
+        {p.visibleText.length ? (
+          <div className="flex flex-wrap gap-2">
+            {p.visibleText.map((text) => (
+              <span
+                key={text}
+                className="rounded-lg border border-brand/60 bg-accent px-2.5 py-1 font-mono text-[13px]"
+              >
+                {text}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No readable text.</p>
+        )}
+      </section>
+      {p.distinguishingFeatures.length > 0 && (
+        <section style={order(1)}>
+          <h3 className="mb-2.5 text-sm font-semibold">Features</h3>
+          <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card">
             {p.distinguishingFeatures.map((feature) => (
-              <li key={feature}>{feature}</li>
+              <li key={feature} className="px-4 py-3 text-sm">
+                {feature}
+              </li>
             ))}
           </ul>
-        </div>
-      </div>
-    </Card>
+        </section>
+      )}
+      <section style={order(2)}>
+        <h3 className="mb-2 text-sm font-semibold">Why this match</h3>
+        <p className="text-sm leading-6 text-muted-foreground">{p.reasoning}</p>
+      </section>
+    </div>
   );
 }
