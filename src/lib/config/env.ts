@@ -3,10 +3,10 @@ import { z } from "zod";
 import { AppError } from "@/lib/errors";
 const envSchema = z.object({
   USE_MOCK_SERVICES: z.enum(["true", "false"]).default("true"),
-  GEMINI_API_KEY: z.string().optional(),
-  SERPAPI_API_KEY: z.string().optional(),
-  GEMINI_VISION_MODEL: z.string().optional(),
-  GEMINI_TEXT_MODEL: z.string().optional(),
+  GEMINI_API_KEY: z.string().trim().optional(),
+  SERPAPI_API_KEY: z.string().trim().optional(),
+  GEMINI_VISION_MODEL: z.string().trim().optional(),
+  GEMINI_TEXT_MODEL: z.string().trim().optional(),
 });
 export function getConfig(
   env: Record<string, string | undefined> = process.env,
@@ -20,18 +20,10 @@ export function getConfig(
     );
   const values = parsed.data;
   const mock = values.USE_MOCK_SERVICES === "true";
-  if (
-    !mock &&
-    [
-      values.GEMINI_API_KEY,
-      values.SERPAPI_API_KEY,
-      values.GEMINI_VISION_MODEL,
-      values.GEMINI_TEXT_MODEL,
-    ].some((v) => !v?.trim())
-  ) {
+  if (!mock && (!values.GEMINI_API_KEY || !values.GEMINI_VISION_MODEL)) {
     throw new AppError(
       "CONFIGURATION_ERROR",
-      "Live mode requires server API keys and both Gemini model settings. Configure the server or explicitly enable demo mode.",
+      "Live identification requires GEMINI_API_KEY and GEMINI_VISION_MODEL on the server. Configure both or explicitly enable demo mode.",
       503,
     );
   }

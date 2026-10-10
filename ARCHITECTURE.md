@@ -1,8 +1,9 @@
 # Architecture
 
 Banana Lens is a stateless Next.js App Router application. The initial release
-uses explicit demo providers; live adapters intentionally return a typed
-not-implemented error. API credentials never enter the browser bundle.
+uses explicit demo providers by default. Live identification uses Gemini;
+other live adapters return a typed not-implemented error. API credentials never
+enter the browser bundle.
 
 ## Data flow and boundaries
 
@@ -38,13 +39,30 @@ substitutes mock data.
 
 ## Identification and verification
 
-The intended live pipeline is Gemini multimodal reasoning across all submitted
-images -> hypothesis, OCR and distinguishing features -> Lens candidates ->
-identity/model/variant verification -> confirmed result or a useful follow-up
-image request. `src/lib/ai/identification.ts` is the Architecture identification extension point.
+Milestone 1 is Gemini multimodal reasoning across all submitted images ->
+structured identification and evidence -> Zod validation -> the existing
+`/api/identify` response. `src/lib/ai/identification.ts` implements the provider
+using `models.generateContent` from the installed official SDK, inline image
+bytes, a server-only instruction module, and `responseJsonSchema` generated from
+Zod. It makes one request across all views with no automatic retries. It does
+not perform Lens, Shopping, candidate verification, or review calls.
+
+The private model response contains the shared identification plus an evidence
+assessment. The server checks model/SKU/unique-label/packaging clues against
+transcribed text, or requires multiple distinct model-identifying visual clues
+with interpretations. Unsupported confirmation is downgraded to likely when a
+family is supported, otherwise uncertain. Conflicting images are uncertain.
+Cautious statuses are never upgraded; numeric confidence is unused. Missing
+follow-up instructions for likely/uncertain receive a model-label photo request.
+Candidates remain empty because no independent candidate search has run. The
+public identification/status/type/provider contracts are unchanged. Perception
+and whether visual clues exclude lookalikes still depend on Gemini; validation
+checks structure and evidence consistency, not independent visual truth.
+
+Future milestones may add Lens candidates and identity/model/variant verification.
 `src/lib/search/lens.ts` and `src/lib/products/verification.ts` are Architecture
 search/verification extension points. Shared Gemini initialization is in `src/lib/ai/client.ts`.
-The initial setup creates the SDK client lazily but makes no live model calls.
+The SDK client is created only for a live identification operation.
 
 All images contributing to the current identity are resubmitted together. No
 session database or permanent upload storage is used. Image counts, MIME types,
@@ -89,11 +107,16 @@ requires no Redis, database, or background workers and is not durable storage.
 
 `src/lib/config/env.ts` is server-only, validates USE_MOCK_SERVICES and centrally
 holds Gemini model selection. Mock is the default without credentials. Explicit
-live mode requires both API keys and model names, and still reports 501 until
-adapters are implemented. Neither missing credentials nor provider failures
+live mode requires GEMINI_API_KEY and GEMINI_VISION_MODEL; SerpApi credentials
+and the text model remain optional for this milestone. Unfinished adapters still
+report 501. Neither missing credentials nor provider failures
 trigger fallback. Errors use `{ error: { code, message } }`; private provider
 exceptions are not sent to clients. API responses are no-store; cache policy is
 owned by application services. No user images or secrets are persisted.
+Missing/inaccessible Gemini configuration returns 503, rate limits return 429,
+and request failures or invalid/blocked/truncated output return safe 502 errors.
+The SDK uses a 60-second request timeout. Diagnostics log only fixed error codes,
+never credentials, image bytes, model response text, or provider exception text.
 
 ## Workstreams
 
