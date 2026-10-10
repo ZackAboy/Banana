@@ -2,6 +2,8 @@
 // workstreams should import from here only.
 export { runProductSearch, type ProductSearchOptions } from "./search";
 export { buildQueries } from "./query";
+// Shared comparison semantics: separator folding must never become literal proof.
+export { identifierObservations } from "./model-number";
 export {
   ProviderError,
   type SearchProvider,

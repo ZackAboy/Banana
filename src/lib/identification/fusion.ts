@@ -2,6 +2,18 @@ import "server-only";
 import { productIdentificationSchema } from "@/schemas/domain";
 import type { ProductIdentification, SemanticVisionEvidence } from "@/types";
 
+export {
+  fuseProductEvidence,
+  suggestedFusionImage,
+  toProductIdentification,
+} from "./adjudication";
+export type {
+  FusionInput,
+  FusionResult,
+  ExternalAssociation,
+  VisualAssessment,
+} from "./evidence-contracts";
+
 export interface SemanticVisionSignal {
   source: "gemini";
   identification: ProductIdentification;
@@ -19,9 +31,11 @@ function containsIdentifier(observation: string, identifier: string | null) {
   );
 }
 
-// Initial fusion boundary: preserve the existing semantic-only policy.
-// TODO(Fusion): accept independent OCR/retrieval/verification signals once their
-// contracts include provenance and conflict handling. Do not invent score weights.
+// Legacy Gemini-only boundary. Runtime orchestration still calls this policy;
+// independent evidence callers use fuseProductEvidence above. Do not upgrade
+// Gemini's transcription by treating it as independently extracted OCR.
+// TODO(Fusion): wire independent evidence in services/analysis only after the
+// versioned Python bridge and Product Search association producer are agreed.
 export function fuseEvidence(
   signal: SemanticVisionSignal,
 ): ProductIdentification {
