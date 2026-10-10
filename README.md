@@ -5,8 +5,9 @@
 A Banana Hacks visual shopping assistant that turns a product photo into an
 identity, matching offers, review evidence, and a concise purchasing perspective.
 When the exact product is unclear, it requests another useful photo instead of
-pretending to know. The default is a complete **synthetic demo**. Live Gemini
-product identification is implemented; other live integrations remain unfinished.
+pretending to know. The default is a complete **synthetic demo**. Live local OCR + Search + Fusion identification is implemented, with optional
+Gemini fallback; other live integrations remain unfinished. See the
+[runtime setup and DualSense manual test](src/lib/identification/RUNTIME.md).
 Live failures never silently fall back to fake data.
 
 ## Start locally
@@ -111,13 +112,16 @@ and omitted to keep the starter simple.
 
 ## Environment
 
-| Variable              | Purpose                                                 |
-| --------------------- | ------------------------------------------------------- |
-| `USE_MOCK_SERVICES`   | `true` (default): explicit demo; `false`: live adapters |
-| `GEMINI_API_KEY`      | Server-only Gemini credential                           |
-| `GEMINI_VISION_MODEL` | Centralized multimodal model selection                  |
-| `GEMINI_TEXT_MODEL`   | Centralized summarization model selection               |
-| `SERPAPI_API_KEY`     | Server-only Lens, Shopping, Search credential           |
+| Variable              | Purpose                                                      |
+| --------------------- | ------------------------------------------------------------ |
+| `USE_MOCK_SERVICES`   | `true` (default): explicit demo; `false`: live adapters      |
+| `IDENTIFICATION_MODE` | `evidence` (default) or explicit legacy `gemini`             |
+| `OCR_PYTHON`          | Absolute executable in the provisioned local OCR environment |
+| `OCR_TIMEOUT_MS`      | Local process timeout: default 60000; range 1000–180000 ms   |
+| `GEMINI_API_KEY`      | Server-only Gemini credential                                |
+| `GEMINI_VISION_MODEL` | Centralized multimodal model selection                       |
+| `GEMINI_TEXT_MODEL`   | Centralized summarization model selection                    |
+| `SERPAPI_API_KEY`     | Server-only Lens, Shopping, Search credential                |
 
 `.env.example` contains illustrative `gemini-2.5-flash` model settings; validate
 availability against the [Gemini model catalog](https://ai.google.dev/gemini-api/docs/models).
@@ -125,12 +129,12 @@ Names are configurable and not hardcoded in adapters. Never use `NEXT_PUBLIC_`
 for API keys. `.env.local`, other environment files, and deployment state are
 ignored; only `.env.example` is intended for version control.
 
-Explicit live mode requires only `GEMINI_API_KEY` and `GEMINI_VISION_MODEL` for
-identification. Missing or inaccessible configuration returns 503; rate limits
-return 429; Gemini request failures and malformed/schema-invalid, blocked, or
-truncated output return safe 502 errors. Unfinished adapters still return
-`501 PROVIDER_NOT_IMPLEMENTED`. SerpApi and the text model are reserved for later
-milestones and are optional here.
+Live evidence mode needs the provisioned local OCR environment and a SerpApi
+key for independent external evidence. Gemini is optional when both key and vision
+model are configured. Missing OCR can use semantic family fallback, but cannot
+confirm in evidence mode. Component failures never become demo evidence. See the
+[runtime guide](src/lib/identification/RUNTIME.md) for exact limits and errors.
+Unfinished adapters still return `501 PROVIDER_NOT_IMPLEMENTED`.
 
 ## Perform one real Gemini identification locally
 
@@ -140,6 +144,7 @@ milestones and are optional here.
 
    ```dotenv
    USE_MOCK_SERVICES=false
+   IDENTIFICATION_MODE=gemini
    GEMINI_API_KEY=your-real-key
    GEMINI_VISION_MODEL=gemini-2.5-flash
    ```
@@ -195,29 +200,15 @@ demo by setting `USE_MOCK_SERVICES=true` and restarting the server.
   normalization and verification, then shopping. Lens is one source rather than
   the sole identification mechanism.
 
-Future fusion will reconcile independent Gemini, OCR, retrieval and verification
-signals behind the unchanged frontend identification contract. There is no fusion
-branch yet. YOLO is deferred. Gemini, UI and reviews require a coordinated future
-assignment. The CFI-ZCT2W cautious-status limitation and the evidence needed to
-resolve it safely are documented in ARCHITECTURE.md.
+OCR + Search + deterministic Fusion now run behind the existing frontend contract.
+Runtime retrieval, richer association and shopping/review implementations remain
+separate work. YOLO remains deferred. See the [runtime guide](src/lib/identification/RUNTIME.md)
+for evidence limits and manual validation.
 
-The optional [vision service](vision-service/README.md) provides only `GET /health`.
-No OCR, embeddings, inference endpoints, model weights, model packages or Next.js
-service client are implemented. It is not part of the Vercel deployment.
-
-Each adapter has an owner-tagged TODO. Keep external calls server-side and behind
-the interfaces in `src/lib/providers/interfaces.ts`. Preserve mocks and explicit
-failure handling. Free quotas, regional/model availability, and provider terms
-vary; this starter never requires paid usage. Check the [Gemini rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)
-and [SerpApi documentation](https://serpapi.com/search-api) before enabling calls.
-Lens needs a publicly reachable image URL; no upload hosting is provisioned here.
-
-A bounded five-minute process-local cache deduplicates identical price/review
-queries (including brand/model/variant and mode). Images/identification aren't
-cached. Cache resets on restarts and is not shared across Vercel instances.
-The current UI fetches prices/reviews only after confirmation. Future internal
-candidate search can precede final identity; shopping/reviews still require a
-verified matching product.
+The optional [vision service](vision-service/README.md) keeps only its HTTP health
+endpoint; OCR is invoked through its existing CLI, not HTTP. Local Python models
+and the source checkout must be provisioned separately from Next.js. This path is
+not packaged for Vercel/serverless deployment.
 
 ## Commands and verification
 

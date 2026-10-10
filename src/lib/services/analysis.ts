@@ -1,5 +1,7 @@
 import "server-only";
 import { getProviders } from "@/lib/providers";
+import { getConfig } from "@/lib/config/env";
+import { identifyWithEvidence } from "@/lib/identification/runtime";
 import type { ImageInput } from "@/lib/providers/interfaces";
 import type { DemoScenario, ProductQuery, VerifyRequest } from "@/types";
 import {
@@ -13,6 +15,14 @@ import { MemoryCache } from "@/lib/cache/memory";
 const cache = new MemoryCache();
 export async function identify(images: ImageInput[], scenario: DemoScenario) {
   const { providers, meta } = getProviders();
+  const config = getConfig();
+  if (!config.mock && config.identificationMode === "evidence") {
+    const result = await identifyWithEvidence(images);
+    return identifyResponseSchema.parse({
+      identification: result.identification,
+      meta: { ...meta, notice: result.notice },
+    });
+  }
   return identifyResponseSchema.parse({
     identification: await providers.identification.identify(images, scenario),
     meta,

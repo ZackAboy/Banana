@@ -8,6 +8,7 @@ import {
   runProductSearch,
   type SearchIdentifier,
 } from "@/lib/search/product-search";
+import { brandRelationship } from "@/lib/identification/brand-relationships";
 
 const timestamp = "2026-10-10T12:00:00.000Z";
 async function searchFixture({
@@ -17,6 +18,8 @@ async function searchFixture({
   title = `${brand} ${product} ${value}`,
   kind = "model_number",
   snippet = "Product listing.",
+  queryBrand = brand,
+  sourceBrand = brand,
 }: {
   value?: string;
   brand?: string;
@@ -24,9 +27,11 @@ async function searchFixture({
   title?: string;
   kind?: SearchIdentifier["kind"];
   snippet?: string;
+  queryBrand?: string;
+  sourceBrand?: string | null;
 } = {}) {
   return runProductSearch(
-    { brand, product, identifiers: [{ kind, value }] },
+    { brand: queryBrand, product, identifiers: [{ kind, value }] },
     [
       {
         id: "offline-source",
@@ -39,7 +44,7 @@ async function searchFixture({
               field: "organic_results",
               title,
               snippet,
-              brand,
+              brand: sourceBrand ?? undefined,
               url: "https://example.com/product",
               urlType: "source_page",
             },
@@ -335,7 +340,9 @@ describe("Search source-linked subject association", () => {
   it("does not manufacture a name or use a query brand when source identity is missing", async () => {
     const search = await searchFixture({ title: "Sony CFI-ZCT1W" });
     expect(deriveSearchAssociations(search)).toEqual([]);
-    const normal = await searchFixture();
+    const normal = await searchFixture({
+      title: "Globex Wireless Controller CFI-ZCT1W",
+    });
     normal.candidates[0].observations[0].brandClue = null;
     expect(deriveSearchAssociations(normal)).toEqual([]);
     const snippetOnly = await searchFixture({
@@ -344,4 +351,158 @@ describe("Search source-linked subject association", () => {
     });
     expect(deriveSearchAssociations(snippetOnly)).toEqual([]);
   });
+});
+
+describe("text-grounded association without provider brand metadata", () => {
+  const manufacturer = "Acme Electronics Inc.";
+  function label(kind: SearchIdentifier["kind"] = "model_number") {
+    const ocr = physical("TS-930", manufacturer, kind);
+    ocr.images[0].brand_clues[0].kind = "manufacturer";
+    return ocr;
+  }
+  function textual(
+    title = "Acme Trail Sensor TS-930",
+    snippet = "Product listing.",
+    kind: SearchIdentifier["kind"] = "model_number",
+  ) {
+    return searchFixture({
+      value: "TS-930",
+      brand: "Acme",
+      product: "Trail Sensor",
+      queryBrand: manufacturer,
+      sourceBrand: null,
+      title,
+      snippet,
+      kind,
+    });
+  }
+  it.each([
+    "Product listing.",
+    "Get the best deals for Acme Trail Sensor TS-930",
+  ])(
+    "confirms a source title despite unstructured commerce prose: %s",
+    async (snippet) => {
+      const search = await textual(undefined, snippet);
+      expect(search.candidates[0].observations[0].brandClue).toBeNull();
+      const [association] = deriveSearchAssociations(search);
+      expect(association.identity).toMatchObject({
+        brand: "Acme",
+        productName: "Acme Trail Sensor",
+      });
+      expect(association.basis).toContain("literal source-title brand prefix");
+      const result = fuseProductEvidence({
+        imageCount: 1,
+        ocr: label(),
+        search,
+      });
+      expect(result.status).toBe("confirmed");
+      expect(result.reasonCodes).toContain(
+        "manufacturer_brand_name_relationship",
+      );
+      expect(
+        result.provenance.find((ref) => ref.id === "ocr:1:brand:0")
+          ?.observation,
+      ).toMatchObject({ value: manufacturer, kind: "manufacturer" });
+      expect(suggestedFusionImage(result)).toBeNull();
+    },
+  );
+  it.each([
+    "Protective Case Compatible with Acme Trail Sensor TS-930",
+    "Replacement Battery for Acme Trail Sensor TS-930",
+    "Works with Acme Trail Sensor TS-930",
+    "Not compatible with Acme Trail Sensor TS-930",
+    "Acme Trail Sensor TS-930 vs TS-940",
+    "Acme Trail Sensor TS-930 support guide",
+    "Acme Trail Sensor TS-930-01",
+    "Globex Trail Sensor TS-930",
+    "Acme Trail Sensor OTHER-99",
+  ])("rejects unsafe or unrelated source text: %s", async (title) => {
+    const search = await textual(title);
+    expect(deriveSearchAssociations(search)).toEqual([]);
+    expect(
+      fuseProductEvidence({ imageCount: 1, ocr: label(), search }).status,
+    ).not.toBe("confirmed");
+  });
+  it.each([
+    "Protective Case for Acme Trail Sensor TS-930",
+    "Replacement Battery for Acme Trail Sensor TS-930",
+    "Works with Acme Trail Sensor TS-930",
+    "Not compatible with Acme Trail Sensor TS-930",
+    "Not TS-930",
+    "Acme Trail Sensor TS-930 vs TS-940",
+  ])(
+    "retains a relationship-target veto from the snippet: %s",
+    async (snippet) => {
+      expect(
+        deriveSearchAssociations(await textual(undefined, snippet)),
+      ).toEqual([]);
+    },
+  );
+  it("records an unrelated structured source brand as a Fusion conflict", async () => {
+    const search = await searchFixture({
+      value: "TS-930",
+      brand: "Globex",
+      product: "Trail Sensor",
+      queryBrand: manufacturer,
+    });
+    expect(deriveSearchAssociations(search)).toHaveLength(1);
+    const result = fuseProductEvidence({ imageCount: 1, ocr: label(), search });
+    expect(result.status).toBe("uncertain");
+    expect(result.reasonCodes).toContain("brand_conflict");
+  });
+  it.each([
+    ["Acme Electronics Inc.", "Acme", "manufacturer", "corporate_name"],
+    ["Acme Inc.", "Acme", "manufacturer", "corporate_name"],
+    ["Acme Electronics Inc.", "Acme", "brand", null],
+    ["Globex Acme Electronics Inc.", "Acme", "manufacturer", null],
+    ["Acme Research Inc.", "Acme", "manufacturer", null],
+    ["Acme Electronics Inc.", "Electronics", "manufacturer", null],
+    ["Acme Electronics Inc.", "AcmeCo", "manufacturer", null],
+    ["Acme Electronics", "Acme", "manufacturer", null],
+    ["Acme Electronics Inc.", "Globex Electronics", "manufacturer", null],
+  ] as const)(
+    "bounded name relationship: %s / %s (%s)",
+    (physical, external, kind, expected) => {
+      expect(brandRelationship(physical, external, kind)).toBe(expected);
+    },
+  );
+  it.each([
+    ["part_number", "Brand: Acme; Model: Trail Sensor; MPN: TS-930"],
+    [
+      "model_number",
+      "Brand: Acme; Product: Trail Sensor; Model Number: TS-930",
+    ],
+    ["sku", "Specifications: Brand, Acme; Model, Trail Sensor; SKU, TS-930"],
+  ] as const)(
+    "accepts consistent explicitly typed %s specifications",
+    async (kind, snippet) => {
+      const search = await textual("Acme Trail Sensor", snippet, kind);
+      const [association] = deriveSearchAssociations(search);
+      expect(association.identifiers[0]).toMatchObject({
+        kind,
+        value: "TS-930",
+      });
+      expect(association.basis).toContain(
+        "labeled specification product name agrees",
+      );
+      expect(
+        fuseProductEvidence({ imageCount: 1, ocr: label(kind), search }).status,
+      ).toBe("confirmed");
+    },
+  );
+  it.each([
+    "Brand: Acme; Model: Trail Sensor; MPN: TS-930", // MPN cannot be relabeled a model
+    "Brand: Acme; Product: Different Sensor; Model Number: TS-930",
+    "Brand: Acme; Product: Trail Sensor; Model Number: TS-930; Model Number: TS-940",
+    "Brand: Acme; Brand: Globex; Product: Trail Sensor; Model Number: TS-930",
+    "Brand: Acme; Model: Trail Sensor; Case works with Acme TS-930",
+    "Brand: Acme; Product: Trail Sensor; Model Number: TS-930-01",
+  ])(
+    "rejects ambiguous/incorrectly typed specification: %s",
+    async (snippet) => {
+      expect(
+        deriveSearchAssociations(await textual("Acme Trail Sensor", snippet)),
+      ).toEqual([]);
+    },
+  );
 });

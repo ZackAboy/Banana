@@ -1,6 +1,7 @@
 // Public surface of the external product search module. Fusion and other
 // workstreams should import from here only.
 export { runProductSearch, type ProductSearchOptions } from "./search";
+export { liveProductSearchProviders, productSearchConfig } from "./config";
 export { buildQueries } from "./query";
 // Shared comparison semantics: separator folding must never become literal proof.
 export { identifierObservations } from "./model-number";

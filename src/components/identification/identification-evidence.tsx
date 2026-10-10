@@ -15,9 +15,9 @@ export function IdentificationEvidence({
         </h3>
         {p.visibleText.length ? (
           <div className="flex flex-wrap gap-2">
-            {p.visibleText.map((text) => (
+            {p.visibleText.map((text, index) => (
               <span
-                key={text}
+                key={`${index}:${text}`}
                 className="rounded-lg border border-brand/60 bg-accent px-2.5 py-1 font-mono text-[13px]"
               >
                 {text}

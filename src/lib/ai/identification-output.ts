@@ -30,6 +30,10 @@ export function invalidGeminiResponse(): never {
 }
 
 export function parseGeminiIdentification(text: string, imageCount: number) {
+  return fuseEvidence(parseGeminiSignal(text, imageCount));
+}
+
+export function parseGeminiSignal(text: string, imageCount: number) {
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -42,5 +46,5 @@ export function parseGeminiIdentification(text: string, imageCount: number) {
   if (evidence.exactMatch.some((clue) => clue.imageIndex > imageCount))
     return invalidGeminiResponse();
 
-  return fuseEvidence({ source: "gemini", identification, evidence });
+  return { source: "gemini" as const, identification, evidence };
 }

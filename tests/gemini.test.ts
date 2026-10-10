@@ -83,6 +83,7 @@ beforeEach(() => {
   generateContent.mockReset();
   clientOptions.mockClear();
   vi.stubEnv("USE_MOCK_SERVICES", "false");
+  vi.stubEnv("IDENTIFICATION_MODE", "gemini");
   vi.stubEnv("GEMINI_API_KEY", "test-secret-never-log");
   vi.stubEnv("GEMINI_VISION_MODEL", "test-configured-vision-model");
   vi.stubEnv("SERPAPI_API_KEY", "");

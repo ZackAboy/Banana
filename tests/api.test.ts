@@ -132,12 +132,16 @@ describe("API demo integration", () => {
   });
   it("validates explicit configuration without leaking credentials", () => {
     expect(getConfig({}).mock).toBe(true);
+    expect(getConfig({ USE_MOCK_SERVICES: "false" }).identificationMode).toBe(
+      "evidence",
+    );
     expect(() => getConfig({ USE_MOCK_SERVICES: "yes" })).toThrow(
       /true or false/,
     );
     expect(() =>
       getConfig({
         USE_MOCK_SERVICES: "false",
+        IDENTIFICATION_MODE: "gemini",
         GEMINI_API_KEY: "secret",
       }),
     ).toThrow(/requires/);

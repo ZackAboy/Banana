@@ -10,6 +10,7 @@ import { productIdentificationSchema } from "@/schemas/domain";
 import {
   deriveSearchAssociations,
   searchGroupHasConflict,
+  identifierIsRelationshipTarget,
 } from "./search-associations";
 import {
   ocrEvidenceSchema,
@@ -47,7 +48,7 @@ interface IdentifierClaim {
 }
 export interface AdaptedEvidence {
   physical: IdentifierClaim[];
-  brands: { value: string; ref: string }[];
+  brands: { value: string; kind: "brand" | "manufacturer"; ref: string }[];
   associations: {
     association: ExternalAssociation;
     identifiers: IdentifierClaim[];
@@ -153,7 +154,7 @@ export function adaptEvidence(input: FusionInput): AdaptedEvidence {
           imageIndexes: [index],
           observation: brand,
         });
-        result.brands.push({ value: brand.value, ref });
+        result.brands.push({ value: brand.value, kind: brand.kind, ref });
       });
     }
   }
@@ -206,7 +207,7 @@ export function adaptEvidence(input: FusionInput): AdaptedEvidence {
       imageIndexes: [],
       observation: run,
     });
-    if (run.status !== "ok")
+    if (run.status === "error" || run.status === "partial")
       result.reasons.add("search_incomplete_or_unavailable");
   });
   const ids = (result.search?.candidates ?? []).map((c) => c.id);
@@ -255,23 +256,7 @@ export function adaptEvidence(input: FusionInput): AdaptedEvidence {
     const fields = [observation.title, observation.snippet ?? ""];
     const compatibilityText = fields.some((field) =>
       declaredIdentifiers.some((identifier) =>
-        identifierObservations(identifier, field, "source").some((match) => {
-          if (match.match !== "literal") return false;
-          let position = field.indexOf(match.observedValue);
-          while (position >= 0) {
-            if (
-              /\b(compatible\s+with|designed\s+for|fits?|replacement\s+for)\b[^.;:\n]*$/i.test(
-                field.slice(0, position),
-              )
-            )
-              return true;
-            position = field.indexOf(
-              match.observedValue,
-              position + match.observedValue.length,
-            );
-          }
-          return false;
-        }),
+        identifierIsRelationshipTarget(field, identifier),
       ),
     );
     if (association.relation !== "product_identity" || compatibilityText) {

@@ -32,11 +32,9 @@ function containsIdentifier(observation: string, identifier: string | null) {
   );
 }
 
-// Legacy Gemini-only boundary. Runtime orchestration still calls this policy;
-// independent evidence callers use fuseProductEvidence above. Do not upgrade
-// Gemini's transcription by treating it as independently extracted OCR.
-// TODO(Fusion): wire independent evidence in services/analysis after agreeing
-// the versioned Python bridge; direct Search subject associations are offline now.
+// Legacy Gemini-only boundary, selected explicitly by IDENTIFICATION_MODE=gemini.
+// The default live path uses fuseProductEvidence with independent observations.
+// Never upgrade a Gemini transcription by treating it as physical OCR.
 export function fuseEvidence(
   signal: SemanticVisionSignal,
 ): ProductIdentification {

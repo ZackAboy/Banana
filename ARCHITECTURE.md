@@ -1,8 +1,9 @@
 # Architecture
 
 Banana Lens is a stateless Next.js App Router application. The initial release
-uses explicit demo providers by default. Live identification uses Gemini;
-other live adapters return a typed not-implemented error. API credentials never
+uses explicit demo providers by default. Live identification defaults to local
+OCR + Product Search + deterministic Fusion, with optional Gemini fallback.
+Unfinished shopping/review/verification adapters return typed errors. API credentials never
 enter the browser bundle.
 
 ## Data flow and boundaries
@@ -10,7 +11,8 @@ enter the browser bundle.
 ```text
 Upload / camera / additional images
   -> POST /api/identify (multipart validation)
-  -> IdentificationProvider -> Gemini parsing -> evidence fusion -> ProductIdentification
+  -> services/analysis -> local OCR CLI -> Product Search -> derived associations
+  -> fuseProductEvidence -> ProductIdentification (optional Gemini if unconfirmed)
   -> uncertain/likely: request another image or verify a candidate
   -> confirmed: GET /api/prices and GET /api/reviews concurrently
   -> shared response schemas -> result dashboard and recommendation
@@ -37,7 +39,26 @@ separate interfaces. `src/lib/providers/index.ts` chooses mock or live providers
 once per operation from server configuration. It never catches a live error and
 substitutes mock data.
 
-## Identification and verification
+## Current runtime integration
+
+`src/lib/identification/runtime.ts` orchestrates existing public evidence contracts.
+`local-ocr.ts` invokes `python -m app.services.ocr_cli` with bounded ordered private
+temporary files, timeout, output limit, no shell and unconditional cleanup. Strong
+OCR identifiers become typed Search inputs; serials are excluded. Search results
+flow through the existing association adapter and deterministic Fusion. Exact
+physical/external agreement can confirm without Gemini or visual retrieval.
+Failed components provide no fabricated evidence. Existing response metadata
+carries safe availability notices; Fusion supplies status, reasoning and photo
+follow-up. The UI does not substitute a label request for a null photo suggestion.
+
+`USE_MOCK_SERVICES=true` remains the deterministic synthetic default.
+`IDENTIFICATION_MODE=evidence` is the live default; `gemini` explicitly selects
+legacy compatibility. See [runtime setup](src/lib/identification/RUNTIME.md) for
+configuration/manual validation. No Python HTTP server or SigLIP wiring is added.
+
+## Legacy identification and verification
+
+The following Gemini-only behavior applies to `IDENTIFICATION_MODE=gemini`.
 
 Milestone 1 is Gemini multimodal reasoning across all submitted images ->
 structured identification and evidence -> Zod validation -> the existing
@@ -105,22 +126,26 @@ requires no Redis, database, or background workers and is not durable storage.
 
 ## Configuration and errors
 
-`src/lib/config/env.ts` is server-only, validates USE_MOCK_SERVICES and centrally
-holds Gemini model selection. Mock is the default without credentials. Explicit
-live mode requires GEMINI_API_KEY and GEMINI_VISION_MODEL; SerpApi credentials
-and the text model remain optional for this milestone. Unfinished adapters still
-report 501. Neither missing credentials nor provider failures
-trigger fallback. Errors use `{ error: { code, message } }`; private provider
-exceptions are not sent to clients. API responses are no-store; cache policy is
-owned by application services. No user images or secrets are persisted.
+`src/lib/config/env.ts` validates server-only live/mock, identification mode,
+OCR executable/timeout and Gemini settings. Mock is the default. Evidence mode
+uses local OCR and external Search with optional Gemini; explicit legacy Gemini
+mode requires its key and model. Component availability is surfaced through safe
+notices or errors, never synthetic fallback. Unfinished adapters report 501.
+Errors use `{ error: { code, message } }`; private provider exceptions are not
+sent to clients. API responses are no-store. Temporary OCR inputs are removed
+after execution; images and identification are not cached.
+
 Missing/inaccessible Gemini configuration returns 503, rate limits return 429,
 and request failures or invalid/blocked/truncated output return safe 502 errors.
-The SDK uses a 60-second request timeout. Diagnostics log only fixed error codes,
-never credentials, image bytes, model response text, or provider exception text.
+The SDK uses a 60-second request timeout. Gemini diagnostics log only fixed error
+codes. Development-only Search diagnostics additionally include bounded, sanitized
+query and source-text summaries plus request/association outcomes. They omit source
+URLs, configured API keys and raw provider errors; production disables this logging.
+Neither diagnostic path logs image bytes or Gemini response text.
 
 ## Independent evidence architecture
 
-Target flow (only the Gemini path is active in this baseline):
+Target flow (OCR + Search + Fusion is active; retrieval remains deferred):
 
 ```text
 Product images (same ordered views)
@@ -173,20 +198,16 @@ source adapters must not independently confirm the final product.
 
 ## Python service decision
 
-A small independently runnable FastAPI boundary is appropriate because PaddleOCR
-and SigLIP/CLIP use Python/native ML dependencies with model lifecycles and hardware
-needs distinct from Next.js server functions. `vision-service/` has only a process
-health endpoint, package setup and tests. Runtime dependencies are FastAPI and
-plain Uvicorn; no ML package, weights, inference, startup downloads or Node client
-are added. Next.js and existing Gemini/live/mock behavior do not depend on it.
-Future OCR/retrieval modules are separate; common entrypoint/config changes are
-coordinated. Service hosting, image transport, timeouts, deployment authentication
-and model readiness must be designed before live wiring. No service URL/env setting
-is introduced until there is a caller. A health response does not mean OCR is ready.
+Python owns local OCR and retrieval dependencies. FastAPI still exposes only
+health; Node invokes the existing OCR CLI rather than adding HTTP inference.
+Pinned OCR dependencies and cached models are separately provisioned. The bridge
+uses versioned JSON, bounded private temporary files and process limits. Health
+does not establish model readiness. Deployment packaging and SigLIP runtime
+transport remain deferred; see the runtime guide above.
 
-## CFI-ZCT2W confirmation issue — deferred to evidence fusion
+## Historical Gemini-only CFI-ZCT2W confirmation issue
 
-The observed Sony DualSense case is reproducible: `MODEL CFI-ZCT2W` matches the
+In explicit legacy Gemini-only mode, the observed Sony DualSense case remains reproducible: `MODEL CFI-ZCT2W` matches the
 proposed model, but an original `likely` status is never upgraded by the current
 policy. Missing next-image instructions then default to another model-label photo.
 This is a policy limitation, not frontend drift. The regression in
@@ -199,7 +220,7 @@ and `exactMatch` are both Gemini-authored; they do not independently establish
 label provenance, extraction versus inference, or cross-source consistency.
 Changing `likely` to `confirmed` just because these fields agree would disguise
 that gap. No temporary upgrade heuristic or model-confidence threshold is added.
-Future fusion must test CFI-ZCT2W positive confirmation, inferred-only identifiers,
+The independent Fusion tests cover CFI-ZCT2W positive confirmation, inferred-only identifiers,
 partial identifiers, mismatched brands/variants, invalid image references and
 conflicts. After confirmation, remove the redundant label request. Part-number
 support can remain internal until a necessary UI contract change is agreed.
@@ -210,4 +231,4 @@ See AGENTS.md and CONTRIBUTING.md. New branches are `feature/vision-ocr`,
 `feature/visual-retrieval`, and `feature/product-search`. OCR owns text extraction;
 retrieval owns embeddings/similarity; Product Search owns external candidates,
 verification and later shopping. Shared fusion/Gemini/orchestration/UI/reviews
-remain maintainer-coordinated. No fusion branch yet; YOLO is deferred.
+remain maintainer-coordinated. Runtime Fusion work uses `feature/evidence-fusion`; YOLO is deferred.

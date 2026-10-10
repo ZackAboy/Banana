@@ -1,6 +1,7 @@
 import "server-only";
 import { productIdentificationSchema } from "@/schemas/domain";
 import type { ProductIdentification } from "@/types";
+import { brandRelationship } from "./brand-relationships";
 import {
   adaptEvidence,
   comparableText,
@@ -53,11 +54,17 @@ export function fuseProductEvidence(input: FusionInput): FusionResult {
     for (const brand of brands) {
       if (
         association.identity.brand &&
-        comparableText(brand.value) !==
-          comparableText(association.identity.brand)
+        !brandRelationship(brand.value, association.identity.brand, brand.kind)
       )
         conflict("brand_conflict", [brand.ref, ref]);
-      else if (association.identity.brand) supporting.add(brand.ref);
+      else if (association.identity.brand) {
+        supporting.add(brand.ref);
+        if (
+          comparableText(brand.value) !==
+          comparableText(association.identity.brand)
+        )
+          reasons.add("manufacturer_brand_name_relationship");
+      }
     }
     for (const [index, a] of identifiers.entries()) {
       for (const b of identifiers.slice(index + 1)) {

@@ -2,10 +2,14 @@
 
 `fuseProductEvidence` is a synchronous, offline adjudication primitive exported
 from `fusion.ts`. It makes no provider, Gemini, model, network or image-download
-calls. `fuseEvidence(SemanticVisionSignal)` remains the legacy Gemini-only policy;
-the existing live `/api/identify` path still uses that policy. **This milestone
-does not fix the running application until orchestration supplies independent
-evidence to the new primitive.** Mock mode is unchanged.
+calls. Live `/api/identify` now calls `identifyWithEvidence` in `runtime.ts`:
+ordered uploads → local OCR CLI → Product Search → derived associations → Fusion
+→ existing `ProductIdentification`. Gemini is optional fallback and is skipped
+on deterministic confirmation. `IDENTIFICATION_MODE=gemini` preserves the explicit
+legacy `fuseEvidence` path. Mock mode is unchanged.
+
+See [runtime setup and manual test](RUNTIME.md) for configuration, failure behavior,
+local process limits and remaining integration boundaries.
 
 ## Input
 
@@ -38,42 +42,50 @@ an empty array) retain caller control. No provider or page crawler was added.
 
 The deliberately narrow positive rule requires:
 
-- A source brand clue appearing as the exact title prefix (case/whitespace
-  insensitive), followed by a descriptive product name. Query brand/product
-  values and the candidate's representative title never supply missing identity.
-- A Search `literal` typed observation in that observation's title field,
-  rechecked with the public identifier comparator using its query value and case
-  policy. The literal observed spelling must end the title, optionally enclosed
-  in parentheses/brackets. Snippet-only and normalized/extension matches do not
-  qualify. SKU and part numbers additionally require an explicit matching title
-  label; an unlabeled suffix is accepted only for model-number observations.
-- No guarded subject ambiguity in title or snippet: relationship/negation terms
-  such as `for`, `compatible`, `fits`, `not`, or `replacement`; a few accessory
-  nouns (`case`, `cover`, `dock`); or review/comparison wording. This small guard
-  deliberately rejects some genuine listings, including unrelated compatibility
-  statements, rather than attempting general language understanding.
-- No source-group disagreement. Different titles/snippets, known brand/variant clues or
-  nonliteral agreement between same-kind observed identifiers suppress the whole
-  group. Guarded ambiguity in any observation of a multi-observation group also
-  blocks the group. Case/whitespace differences are tolerated, but name aliases
-  and differently worded snippets are not merged. Fusion records `source_group_identity_conflict` with all group
-  observation references, even when no positive association survives.
+- A brand actually grounded in the source and appearing as a whole title prefix:
+  provider metadata, a labeled `Brand` field, or literal leading source-title
+  words related to the query brand/manufacturer clue. The query is only a spelling
+  hint; it cannot supply a brand absent from source text. A descriptive product
+  name must follow. Candidate representative titles never replace observations.
+- A Search `literal` typed title observation, rechecked with Search's public
+  identifier comparator. The observed identifier must end the title (optional
+  parentheses/brackets). Bare suffixes establish model roles only; SKU/part
+  numbers require explicit matching labels. Normalized/extension matches do not
+  qualify and original spelling is preserved.
+- Alternatively, a strongly labeled specification snippet may qualify: `Brand`,
+  a descriptive `Product`/`Product Name`/`Model` matching the whole subject title,
+  and an explicit identifier field matching both the literal value and typed
+  kind. Fields must be delimited by semicolons/newlines and use colon/comma label
+  separators. Conflicting repeated fields are rejected. `MPN`/`P/N`/`Part Number`
+  are part numbers, **not model numbers**; arbitrary snippet mentions do not qualify.
+- The title must pass the small accessory/relationship/negation/comparison/support
+  guard. Snippet guards target the particular identifier's relationship: e.g.
+  “works with”, “case for”, or “not compatible with” still veto, while commerce
+  boilerplate such as “get the best deals for” does not poison a strong title.
+- No source-group disagreement. Different titles/snippets, known brand/variant
+  clues or nonliteral agreement between same-kind observed identifiers suppress
+  the group. Different product names across accepted associations remain ambiguous.
 
-An accepted finding retains the exact product-name prefix and identifier spelling,
-typed kind/case policy, candidate ID, observation index and an explanatory basis.
-The existing source reference retains URL/domain, title/snippet, provider/engine,
-query/request, timestamp and observations; provenance is dereferenced rather
-than duplicated into a new public contract. Variant clues require a literal
-whitespace-delimited occurrence in the returned text. Rank, similarity, duplicate
-count, source authority scores and untyped token guesses are unused.
+Manufacturer/brand comparison is bounded lexical normalization, not ownership
+verification. Exact case/whitespace agreement always qualifies. Only a physical
+**manufacturer** clue may lose an anchored legal suffix (`Inc.`, `Ltd.`, `LLC`,
+`Corp.`, etc.). A shorter external brand must be the complete leading name with
+at least four letters, followed only by one or two generic corporate descriptors
+(`electronics`, `interactive`, `entertainment`, `technology`, `technologies`,
+`products`, `systems`). Middle/shared tokens, arbitrary remaining words, descriptor-only
+brands and suffix-free aliases fail. Explicit physical **brand** clues still require
+exact agreement. Raw values/kinds remain in provenance; related names add
+`manufacturer_brand_name_relationship` to the explanation.
 
-Search evidence is sufficient for this restricted direct-listing pattern, **not
-for arbitrary subject association**. A bare identifier mention, missing source
-brand/name, identifier buried in prose, or an ambiguous/misleading title remains
-unresolved. Source text is assumed to describe its subject honestly; this producer
-does not verify a destination page or detect every accessory synonym. The offline
-tests use synthetic provider responses normalized by the real Search module;
-they establish local rule behavior, not live source accuracy.
+`inspectSearchAssociations` reports rejection codes from the same policy; the
+bounded development logger shows provider/request outcomes and association
+acceptance without dumping raw payloads or credentials. Actual failed/partial
+Search runs remain `search_incomplete_or_unavailable` plus runtime notices and
+provenance. They do not veto otherwise established exact identity. Intentional
+optional skips remain in provenance without being described as failures.
+
+These conservative rules intentionally have false negatives. Fixtures normalized
+by the real Search module validate local policy, not destination-page accuracy.
 
 Likewise, native cosine scores are preserved, not thresholded into visual findings
 or status. A `VisualAssessment` requires a separate, explained inspection or
@@ -175,36 +187,27 @@ never sufficient confirmation.
 
 ## Remaining runtime integration, in order
 
-1. **Fusion + OCR + Visual Retrieval maintainers:** agree the versioned inference
-   HTTP/client boundary, ordered request images, deployment/authentication,
-   readiness, timeout and error mapping. `vision-service/app/main.py` currently
-   exposes only `/health`; its local OCR/retrieval modules have no HTTP endpoints.
-   Before wiring, add shared Python/TypeScript contract fixtures for both versions.
-   The present test reads the existing Python OCR fixture, with no model loading.
-2. **Product Search:** supply existing normalized results to Fusion. Direct
-   subject-title association is now implemented offline; richer ambiguous
-   association still requires reviewed findings. Existing
-   `src/lib/products/verification.ts` remains unimplemented; this producer does
-   not replace runtime candidate verification or destination-page validation.
-3. **Product Search + Visual Retrieval:** provide a bounded external-image
-   acquisition boundary: Search candidate ID/image URL -> safe fetched bytes ->
-   `CandidateImage` -> SigLIP. Preserve the candidate ID/image ID/source URL and
-   submitted query indexes. Fetching requires URL/DNS/redirect safety, byte limits,
-   MIME validation and timeouts. No downloader, hosting or SSRF layer is included.
-   Agree explained visual assessments separately; raw scores remain raw scores.
-4. **Fusion maintainers:** orchestrate public interfaces in
-   `src/lib/services/analysis.ts`, call `fuseProductEvidence`, then project the
-   result for `/api/identify`. Exact independent evidence should run without
-   Gemini; use Gemini optionally for ambiguity/reconciliation. Preserve explicit
-   mock mode and existing errors. Keep detailed Fusion findings available for a
-   future coordinated response/UI extension, especially non-photo follow-ups.
+1. **Fusion + OCR maintainers:** deploy/provision the local CLI environment and
+   cached weights; the runtime bridge requires the source checkout and a Node
+   host with subprocess/filesystem support. No HTTP inference server is needed.
+2. **Product Search:** richer ambiguous subject association still requires
+   reviewed findings. Candidate verification and destination-page validation
+   remain separate work; strict direct-title rules intentionally miss listings.
+3. **Product Search + Visual Retrieval:** Search candidate ID/image URL → safe
+   bounded fetched bytes → SigLIP remains deferred. Agree URL/DNS/redirect safety,
+   MIME/byte/time limits and explained visual assessments before runtime wiring.
+   No downloader, hosting, raw-score threshold or SigLIP runtime is included.
+4. **Fusion maintainers:** expose detailed Fusion provenance/part numbers through
+   a coordinated additive API/UI contract only when needed; runtime currently
+   projects the existing identification fields and safe notices.
 
 Assumptions: explicit OCR labels refer to the photographed object; OCR's
 `label_role: unknown` is preserved and never relabeled as manufacturer-verified.
 Association findings come from a qualifying external subject title or a genuine
 independent source review. Candidate
-image bytes are faithfully linked by the acquisition caller. Conservative brand
-comparison has no corporate-name aliases; source identities have no name aliases.
+image bytes are faithfully linked by the acquisition caller. Manufacturer/brand
+comparison uses only the bounded lexical relationship above; source identities
+have no product-name aliases.
 These limitations can produce uncertainty rather than unsafe automatic merging.
 
 ## Validation

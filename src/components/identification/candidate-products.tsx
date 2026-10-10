@@ -20,16 +20,18 @@ export function CandidateProducts({
       >
         <h2 className="text-lg font-bold tracking-tight">Almost there</h2>
         <p className="mt-1.5 text-sm leading-6 text-foreground/75">
-          {p.suggestedNextImage ?? "Add a photo of the model label."}
+          {p.suggestedNextImage ?? p.reasoning}
         </p>
-        <button
-          type="button"
-          onClick={onAddPhoto}
-          className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground text-sm font-semibold text-background transition active:scale-[0.97]"
-        >
-          <Camera className="size-4" />
-          Add photo
-        </button>
+        {p.suggestedNextImage && (
+          <button
+            type="button"
+            onClick={onAddPhoto}
+            className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground text-sm font-semibold text-background transition active:scale-[0.97]"
+          >
+            <Camera className="size-4" />
+            Add photo
+          </button>
+        )}
       </section>
       {p.candidates.length > 0 && (
         <section style={order(1)}>
