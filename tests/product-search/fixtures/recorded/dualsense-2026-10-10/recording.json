@@ -1,0 +1,11 @@
+{
+  "recordedAt": "2026-10-10T19:02:03.086Z",
+  "provider": "SerpApi",
+  "query": {
+    "brand": "Sony",
+    "product": "DualSense Wireless Controller",
+    "modelNumber": "CFI-ZCT2W"
+  },
+  "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/Playstation_Dualsense_controller.jpg/1280px-Playstation_Dualsense_controller.jpg",
+  "note": "Real responses trimmed to the fields the adapters read."
+}

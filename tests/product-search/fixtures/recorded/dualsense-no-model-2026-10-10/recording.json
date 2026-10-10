@@ -1,0 +1,10 @@
+{
+  "recordedAt": "2026-10-10T19:02:20.370Z",
+  "provider": "SerpApi",
+  "query": {
+    "brand": "Sony",
+    "product": "DualSense Wireless Controller"
+  },
+  "imageUrl": null,
+  "note": "Real responses trimmed to the fields the adapters read."
+}
