@@ -58,13 +58,26 @@ export function trimSerpApiResponse(body: unknown): Json {
       "q",
       "url",
       "gl",
+      "country",
       "hl",
     ]),
   };
-  if (typeof source.error === "string") out.error = source.error;
+  if (source.search_metadata)
+    out.search_metadata = pick(source.search_metadata, ["status"]);
   for (const [field, keys] of Object.entries(LISTS))
     if (Array.isArray(source[field]))
-      out[field] = (source[field] as unknown[]).map((item) => pick(item, keys));
+      out[field] = (source[field] as unknown[]).map((item) =>
+        pick(item, [
+          ...keys,
+          "image",
+          "thumbnail",
+          "thumbnails",
+          "serpapi_thumbnails",
+          "product_id",
+          "brand",
+          "variant",
+        ]),
+      );
   return out;
 }
 

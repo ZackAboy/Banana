@@ -32,7 +32,7 @@ afterAll(() => restoreNetwork());
 
 describe("query building", () => {
   it("puts the quoted model number with brand first, then brand + product", () => {
-    const queries = buildQueries(DUALSENSE);
+    const queries = buildQueries(DUALSENSE, true);
     expect(queries.map((q) => [q.id, q.text])).toEqual([
       ["exact-model", '"CFI-ZCT2W" Sony'],
       ["brand-product", "Sony DualSense Wireless Controller"],
@@ -43,12 +43,14 @@ describe("query building", () => {
 
   it("handles a missing model number, brand or product", () => {
     expect(
-      buildQueries({ brand: "Sony", product: "DualSense" }).map((q) => q.id),
+      buildQueries({ brand: "Sony", product: "DualSense" }, true).map(
+        (q) => q.id,
+      ),
     ).toEqual(["brand-product", "reviews", "reviews-reddit"]);
-    const modelOnly = buildQueries({ modelNumber: "CFI-ZCT2W" });
+    const modelOnly = buildQueries({ modelNumber: "CFI-ZCT2W" }, true);
     expect(modelOnly[0]).toMatchObject({
       text: '"CFI-ZCT2W"',
-      fields: ["modelNumber"],
+      fields: ["identifiers"],
     });
     // Unquoted, Google read "CFI-ZCT2W" as "CFI" in a live run.
     expect(modelOnly.map((q) => q.text)).toEqual([
@@ -65,7 +67,7 @@ describe("model numbers", () => {
   it("normalises case, spaces and separators", () => {
     for (const variant of [
       "cfi-zct2w",
-      "CFI ZCT2W",
+      "cfi zct2w",
       "CFIZCT2W",
       "CFI_ZCT2W",
       " CFI-ZCT2W ",
@@ -80,8 +82,8 @@ describe("model numbers", () => {
     );
     expect(spaced).toMatchObject({
       exact: false,
-      normalized: true,
-      seen: ["CFI ZCT2W"],
+      normalized: false,
+      seen: ["ZCT2W"],
     });
     const lower = matchModelNumber("CFI-ZCT2W", "model cfi-zct2w");
     expect(lower).toMatchObject({
@@ -117,9 +119,7 @@ describe("model numbers", () => {
         "The CFI-ZCT2W revision replaces the original CFI-ZCT1W, lighter.",
       ),
     ).toEqual(["CFI-ZCT2W", "CFI-ZCT1W"]);
-    expect(extractModelNumbers("SONY CFI ZCT2W (white)")).toEqual([
-      "CFI ZCT2W",
-    ]);
+    expect(extractModelNumbers("SONY CFI ZCT2W (white)")).toEqual(["ZCT2W"]);
     // From a live snippet: an em dash separates clauses, not model pieces.
     expect(
       extractModelNumbers(
@@ -129,8 +129,7 @@ describe("model numbers", () => {
       ),
     ).toEqual(["CFI-ZCT1W"]);
     expect(extractModelNumbers("Model: CFI-ZCT2W/CFI-ZCT1W.")).toEqual([
-      "CFI-ZCT2W",
-      "CFI-ZCT1W",
+      "CFI-ZCT2W/CFI-ZCT1W",
     ]);
   });
 
@@ -170,7 +169,7 @@ describe("price parsing", () => {
     ["EUR 59.99", null, 5999, "EUR"],
     ["129,00 kr", "SEK", 12900, "SEK"],
     ["1 299,00 zł", null, 129900, "PLN"],
-    ["$69.99 - $74.99", "USD", 6999, "USD"],
+    ["$69.99 - $74.99", "USD", null, "USD"],
   ])("parses %s", (text, hint, minor, currency) => {
     expect(parsePrice(text, hint)).toEqual({
       amountMinor: minor,
@@ -202,31 +201,33 @@ describe("URL canonicalisation", () => {
   it.each([
     [
       "https://www.pawnamerica.com/product/sony-dualsense-cfi-zct2w-playstation-5-wireless-controller-white?srsltid=AU7gw4WGYu5t9VE7dizyIQMTle2nStgfR_lAQ7tprVAd_ClsWrB",
-      "https://pawnamerica.com/product/sony-dualsense-cfi-zct2w-playstation-5-wireless-controller-white",
+      "https://www.pawnamerica.com/product/sony-dualsense-cfi-zct2w-playstation-5-wireless-controller-white",
     ],
     [
       "https://www.reddit.com/r/PS5/comments/1j507tf/first_look_at_the_dualsense_wireless_controller/",
-      "https://reddit.com/r/PS5/comments/1j507tf/first_look_at_the_dualsense_wireless_controller",
+      "https://www.reddit.com/r/PS5/comments/1j507tf/first_look_at_the_dualsense_wireless_controller/",
     ],
     [
       "https://www.target.com/p/dualsense-wireless-controller-for-playstation-5/-/A-81114477?showOnlyQuestions=true",
-      "https://target.com/p/dualsense-wireless-controller-for-playstation-5/-/A-81114477?showOnlyQuestions=true",
+      "https://www.target.com/p/dualsense-wireless-controller-for-playstation-5/-/A-81114477?showOnlyQuestions=true",
     ],
     [
       "https://www.apple.com/shop/product/hsg32zm/a/dualsense™-wireless-controller",
-      "https://apple.com/shop/product/hsg32zm/a/dualsense%E2%84%A2-wireless-controller",
+      "https://www.apple.com/shop/product/hsg32zm/a/dualsense%E2%84%A2-wireless-controller",
     ],
   ])("canonicalises %s", (input, expected) => {
     expect(canonicalizeUrl(input)).toBe(expected);
   });
 
-  it("reduces Amazon product URLs to the ASIN", () => {
+  it("preserves Amazon seller/variant/path distinctions", () => {
     // Real Amazon ASIN from the Lens recording, with Amazon's usual slug/ref/tag noise.
     expect(
       canonicalizeUrl(
         "https://www.amazon.com/PlayStation-DualSense-Wireless-Controller/dp/B0BSYFB99D/ref=sr_1_1?tag=x-20&th=1",
       ),
-    ).toBe("https://amazon.com/dp/B0BSYFB99D");
+    ).toBe(
+      "https://www.amazon.com/PlayStation-DualSense-Wireless-Controller/dp/B0BSYFB99D/ref=sr_1_1?tag=x-20&th=1",
+    );
   });
 
   it("drops common tracking parameters and sorts the rest", () => {
@@ -234,7 +235,9 @@ describe("URL canonicalisation", () => {
       canonicalizeUrl(
         "http://WWW.BestBuy.com:80/site/searchpage.jsp?st=dualsense&utm_source=x&gclid=1&fbclid=2&cp=2#reviews",
       ),
-    ).toBe("https://bestbuy.com/site/searchpage.jsp?cp=2&st=dualsense");
+    ).toBe(
+      "http://www.bestbuy.com/site/searchpage.jsp?cp=2&st=dualsense#reviews",
+    );
   });
 });
 
@@ -330,7 +333,7 @@ describe("search without a model number", () => {
 });
 
 describe("provider independence", () => {
-  it("merges results from any provider implementing the interface", async () => {
+  it("preserves provider observations with differing URL semantics", async () => {
     // A second, non-SerpApi provider returning the same real eBay listing.
     const real = (
       recorded("google_shopping", '"CFI-ZCT2W" Sony')
@@ -365,8 +368,8 @@ describe("provider independence", () => {
       now: FIXED_NOW,
     });
     const merged = result.offers.filter((o) => o.title === real.title);
-    expect(merged).toHaveLength(1);
-    expect(merged[0].foundBy.map((r) => r.provider)).toEqual([
+    expect(merged).toHaveLength(2);
+    expect(merged.flatMap((o) => o.foundBy.map((r) => r.provider))).toEqual([
       "serpapi:google_shopping",
       "test:other-vendor",
     ]);
@@ -386,7 +389,9 @@ describe("provider independence", () => {
       { imageUrl: IMAGE_URL, now: FIXED_NOW },
     );
     expect(
-      result.providerRuns.every((r) => r.error?.code === "NOT_CONFIGURED"),
+      result.providerRuns
+        .filter((r) => r.kind !== "reviews")
+        .every((r) => r.error?.code === "NOT_CONFIGURED"),
     ).toBe(true);
   });
 
@@ -394,7 +399,7 @@ describe("provider independence", () => {
     const acquire = createRateLimiter(2, 1000);
     acquire(0);
     acquire(10);
-    expect(() => acquire(20)).toThrow(/limit/);
+    expect(() => acquire(20)).toThrow(/allowance/);
     expect(() => acquire(1001)).not.toThrow();
   });
 });

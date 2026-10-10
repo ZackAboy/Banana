@@ -1,95 +1,187 @@
 import { z } from "zod";
 
-// Module-local contracts for external product search. These deliberately live
-// outside src/schemas: fusion and the shared ProductCandidate/ProductOffer types
-// must agree on them before any of this is promoted to a shared contract.
-// None of these types carry a verdict (confirmed/likely/uncertain) or confidence.
-
-const optionalText = z.string().trim().min(1).optional();
-const isoTimestamp = z.iso.datetime();
-const httpUrl = z.url({ protocol: /^https?$/ });
-
-export const productSearchQuerySchema = z.object({
-  brand: optionalText,
-  product: optionalText,
-  modelNumber: optionalText,
-});
-
+// Module-local discovery evidence. No final identity or calibrated confidence.
+const text = z.string().min(1);
+const optionalText = z
+  .string()
+  .max(500)
+  .refine((v) => v.trim().length > 0)
+  .optional();
+export const httpUrl = z.url({ protocol: /^https?$/ });
+const timestamp = z.iso.datetime();
+export const identifierKindSchema = z.enum([
+  "model_number",
+  "sku",
+  "part_number",
+]);
+export const searchIdentifierSchema = z
+  .object({
+    kind: identifierKindSchema,
+    value: z
+      .string()
+      .min(1)
+      .max(120)
+      .refine((v) => v.trim().length > 0),
+    caseSensitive: z.boolean().optional(),
+  })
+  .strict();
+export const productSearchQuerySchema = z
+  .object({
+    brand: optionalText,
+    product: optionalText,
+    // Existing shorthand remains supported; identifiers is the typed boundary.
+    modelNumber: searchIdentifierSchema.shape.value.optional(),
+    sku: searchIdentifierSchema.shape.value.optional(),
+    partNumber: searchIdentifierSchema.shape.value.optional(),
+    variant: optionalText,
+    identifiers: z.array(searchIdentifierSchema).max(8).optional(),
+  })
+  .strict()
+  .refine(
+    (q) =>
+      (q.identifiers?.length ?? 0) +
+        Number(Boolean(q.modelNumber)) +
+        Number(Boolean(q.sku)) +
+        Number(Boolean(q.partNumber)) <=
+      8,
+    "Supply at most eight identifier clues.",
+  );
 export const providerKindSchema = z.enum([
   "web",
   "shopping",
   "visual",
   "reviews",
 ]);
-
-/** Which concrete provider produced an item, and through which query. */
-export const providerRefSchema = z.object({
-  provider: z.string().min(1),
-  kind: providerKindSchema,
-  queryId: z.string().min(1),
-  retrievedAt: isoTimestamp,
+export const errorCodeSchema = z.enum([
+  "SKIPPED",
+  "NOT_CONFIGURED",
+  "AUTH",
+  "TIMEOUT",
+  "RATE_LIMITED",
+  "HTTP_ERROR",
+  "INVALID_RESPONSE",
+  "PROVIDER_ERROR",
+]);
+export const safeErrorSchema = z.object({
+  code: errorCodeSchema,
+  message: text,
 });
-
-/** Raw, uninterpreted comparisons between the query and a source's text. */
+export const requestRecordSchema = z.object({
+  id: text,
+  queryId: text,
+  engine: text,
+  queryText: z.string().nullable(),
+  // Query parameters/userinfo removed; hash correlates the actual input URL.
+  inputImageUrl: httpUrl.nullable(),
+  inputImageId: z.string().nullable(),
+  country: text,
+  language: text,
+  executed: z.boolean(),
+  status: z.enum(["pending", "ok", "error"]),
+  error: safeErrorSchema.nullable(),
+  retrievedAt: timestamp,
+  discardedRows: z.number().int().nonnegative(),
+});
+export const providerRefSchema = z.object({
+  provider: text,
+  kind: providerKindSchema,
+  engine: z.string().nullable(),
+  queryId: text,
+  requestId: z.string().nullable(),
+  retrievedAt: timestamp,
+});
+export const identifierObservationSchema = z.object({
+  kind: identifierKindSchema,
+  queryValue: text,
+  normalizedQueryValue: text,
+  caseSensitive: z.boolean(),
+  observedValue: text,
+  normalizedObservedValue: text,
+  match: z.enum(["literal", "normalized", "extension"]),
+  field: text,
+});
 export const matchSignalsSchema = z.object({
-  /** Query model number appears verbatim (case-insensitive, whole token). */
   exactModelNumber: z.boolean().nullable(),
-  /** Matches after removing case, spaces, hyphens, dots and underscores. */
   normalizedModelNumber: z.boolean().nullable(),
-  /** Seen tokens that extend the query model with a short suffix (e.g. regional). */
   modelNumberSuffixVariants: z.array(z.string()),
-  /** Model-number-like tokens seen in the source, as originally written. */
+  // Legacy field: untyped identifier-shaped tokens, not extracted model facts.
   modelNumbersSeen: z.array(z.string()),
   brandMatch: z.boolean().nullable(),
   productTermsMatched: z.array(z.string()),
   productTermsMissing: z.array(z.string()),
-  /** Dice overlap of query tokens and title tokens, 0..1. Not a probability. */
   titleTokenOverlap: z.number().min(0).max(1),
 });
-
-export const evidenceSchema = z.object({
-  claim: z.string().min(1),
-  sourceUrl: httpUrl,
-  provider: z.string().min(1),
-  queryId: z.string().min(1),
-  /** Which field of the provider response the snippet came from. */
-  field: z.string().min(1),
-  snippet: z.string(),
-  retrievedAt: isoTimestamp,
+export const sourceObservationSchema = z.object({
+  ...providerRefSchema.shape,
+  field: text,
+  title: text,
+  url: httpUrl,
+  domain: text,
+  position: z.number().int().positive().nullable(),
+  snippet: z.string().nullable(),
+  imageUrls: z.array(httpUrl),
+  providerProductId: z.string().nullable(),
+  urlType: z.enum([
+    "source_page",
+    "google_product_page",
+    "merchant_page",
+    "unknown",
+  ]),
+  brandClue: z.string().nullable(),
+  variantClue: z.string().nullable(),
+  identifiers: z.array(identifierObservationSchema),
 });
-
+export const evidenceSchema = z.object({
+  claim: text,
+  sourceUrl: httpUrl,
+  provider: text,
+  queryId: text,
+  requestId: z.string().nullable(),
+  field: text,
+  snippet: z.string(),
+  retrievedAt: timestamp,
+});
 export const externalProductCandidateSchema = z.object({
-  title: z.string().min(1),
-  /** Only when a provider states it explicitly; never inferred. */
+  id: text,
+  title: text,
   brand: z.string().nullable(),
+  variant: z.string().nullable(),
+  domain: text,
+  imageUrls: z.array(httpUrl),
+  identifierObservations: z.array(identifierObservationSchema),
   modelNumbersSeen: z.array(z.string()),
   canonicalUrl: httpUrl,
-  /** Every original URL merged into this candidate. */
   urls: z.array(httpUrl),
   foundBy: z.array(providerRefSchema).min(1),
+  observations: z.array(sourceObservationSchema).min(1),
   matchSignals: matchSignalsSchema,
   evidence: z.array(evidenceSchema),
 });
-
 export const offerConditionSchema = z.enum([
   "new",
   "used",
   "refurbished",
+  "open_box",
   "unknown",
 ]);
-
+export const offerObservationSchema = sourceObservationSchema.extend({
+  merchant: text,
+  displayedPrice: z.string().nullable(),
+  currencyHint: z.string().nullable(),
+  displayedListPrice: z.string().nullable(),
+  conditionText: z.string().nullable(),
+  availability: z.string().nullable(),
+  shipping: z.string().nullable(),
+});
 export const externalOfferSchema = z.object({
-  merchant: z.string().min(1),
-  title: z.string().min(1),
-  /** Integer minor units (cents for USD, yen for JPY). Null if unparseable. */
+  merchant: text,
+  title: text,
   priceMinor: z.number().int().nonnegative().nullable(),
-  /** ISO 4217. Null when the price string does not establish a currency. */
   currency: z
     .string()
     .regex(/^[A-Z]{3}$/)
     .nullable(),
   originalPrice: z.string().nullable(),
-  /** Listed pre-discount price, when the provider gives one. */
   listPriceMinor: z.number().int().nonnegative().nullable(),
   availability: z.string().nullable(),
   condition: offerConditionSchema,
@@ -97,47 +189,53 @@ export const externalOfferSchema = z.object({
   url: httpUrl,
   canonicalUrl: httpUrl,
   foundBy: z.array(providerRefSchema).min(1),
+  observations: z.array(offerObservationSchema).min(1),
   matchSignals: matchSignalsSchema,
 });
-
 export const reviewSourceTypeSchema = z.enum([
   "reddit",
   "review_site",
   "manufacturer_spec",
   "other",
 ]);
-
 export const discoveredReviewSourceSchema = z.object({
-  title: z.string().min(1),
+  title: text,
   url: httpUrl,
   canonicalUrl: httpUrl,
   sourceType: reviewSourceTypeSchema,
-  domain: z.string().min(1),
+  domain: text,
   snippet: z.string().nullable(),
   publishedAt: z.string().nullable(),
   foundBy: z.array(providerRefSchema).min(1),
+  observations: z.array(sourceObservationSchema).min(1),
 });
-
 export const providerRunSchema = z.object({
-  provider: z.string().min(1),
+  provider: text,
   kind: providerKindSchema,
-  status: z.enum(["ok", "error", "skipped"]),
+  status: z.enum(["ok", "partial", "error", "skipped"]),
   queryIds: z.array(z.string()),
+  requests: z.array(requestRecordSchema),
+  discardedRows: z.number().int().nonnegative(),
   durationMs: z.number().nonnegative(),
   itemCount: z.number().int().nonnegative(),
-  /** Present when status is error or skipped. */
-  error: z
-    .object({ code: z.string().min(1), message: z.string().min(1) })
-    .nullable(),
+  error: safeErrorSchema.nullable(),
 });
-
 export const builtQuerySchema = z.object({
-  id: z.string().min(1),
-  text: z.string().min(1),
-  fields: z.array(z.enum(["brand", "product", "modelNumber"])),
+  id: text,
+  text,
+  fields: z.array(
+    z.enum([
+      "brand",
+      "product",
+      "modelNumber",
+      "sku",
+      "partNumber",
+      "variant",
+      "identifiers",
+    ]),
+  ),
   purpose: z.enum(["product", "reviews"]),
 });
-
 export const productSearchResultSchema = z.object({
   query: productSearchQuerySchema,
   queries: z.array(builtQuerySchema),
@@ -145,12 +243,15 @@ export const productSearchResultSchema = z.object({
   offers: z.array(externalOfferSchema),
   reviewSources: z.array(discoveredReviewSourceSchema),
   providerRuns: z.array(providerRunSchema),
-  startedAt: isoTimestamp,
-  finishedAt: isoTimestamp,
-  /** Raw provider payloads, only when explicitly requested for debugging. */
+  startedAt: timestamp,
+  finishedAt: timestamp,
   raw: z.record(z.string(), z.array(z.unknown())).optional(),
 });
-
+export type SearchIdentifier = z.infer<typeof searchIdentifierSchema>;
+export type IdentifierObservation = z.infer<typeof identifierObservationSchema>;
+export type SourceObservation = z.infer<typeof sourceObservationSchema>;
+export type OfferObservation = z.infer<typeof offerObservationSchema>;
+export type RequestRecord = z.infer<typeof requestRecordSchema>;
 export type ProductSearchQuery = z.infer<typeof productSearchQuerySchema>;
 export type ProviderKind = z.infer<typeof providerKindSchema>;
 export type ProviderRef = z.infer<typeof providerRefSchema>;

@@ -29,6 +29,7 @@ export function liveProductSearchProviders(
   const config = productSearchConfig(env);
   return createSerpApiProviders({
     apiKey: config.serpApiKey,
+    timeoutMs: config.timeoutMs,
     country: config.country,
     language: config.language,
     maxRequestsPerHour: config.maxRequestsPerHour,

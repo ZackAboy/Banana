@@ -27,8 +27,7 @@ export const REVIEW_SITES = [
   "digitalfoundry.net",
 ];
 
-// Official manufacturer domains by brand (lowercase). Brand-named hosts such as
-// "sony.co.uk" are also recognised by the fallback below.
+// Explicit manufacturer domains only. A brand-shaped hostname is not ownership.
 export const MANUFACTURER_DOMAINS: Record<string, string[]> = {
   sony: ["sony.com", "playstation.com", "sony.net"],
   lg: ["lg.com"],
@@ -53,9 +52,7 @@ export function classifySource(
   const brandKey = brand?.toLowerCase().replace(/[^a-z0-9]/g, "");
   if (brandKey) {
     const known = MANUFACTURER_DOMAINS[brandKey] ?? [];
-    const label = host.split(".")[0];
-    if (known.some((d) => onDomain(host, d)) || label === brandKey)
-      return "manufacturer_spec";
+    if (known.some((d) => onDomain(host, d))) return "manufacturer_spec";
   }
   if (
     REVIEW_SITES.some((site) =>

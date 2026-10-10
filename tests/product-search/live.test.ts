@@ -1,16 +1,18 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 import { runProductSearch } from "@/lib/search/product-search";
 import {
   liveProductSearchProviders,
   productSearchConfig,
 } from "@/lib/search/product-search/config";
+import { assertUsefulLiveEvidence } from "./live-assertions";
+import { imageReferenceUrl } from "@/lib/search/product-search/url";
 import { DUALSENSE } from "./helpers";
 import { fixtureName, trimSerpApiResponse } from "./record";
 
 // OPT-IN LIVE CHECK. Skipped unless PRODUCT_SEARCH_LIVE=1. Uses real SerpApi
-// searches (billed against your plan: about 5 per run, one more with an image).
+// requests: at most 4 for default clues, or 5 with a supplied public image URL.
 // PRODUCT_SEARCH_RECORD_DIR saves trimmed responses as replayable fixtures.
 // See src/lib/search/product-search/README.md for the command.
 const live = process.env.PRODUCT_SEARCH_LIVE === "1";
@@ -54,7 +56,7 @@ describe.skipIf(!live)("product search against live providers", () => {
             recordedAt: result.finishedAt,
             provider: "SerpApi",
             query,
-            imageUrl,
+            imageUrl: imageUrl ? imageReferenceUrl(imageUrl) : null,
             note: "Real responses trimmed to the fields the adapters read.",
           },
           null,
@@ -74,6 +76,6 @@ describe.skipIf(!live)("product search against live providers", () => {
     console.log(
       `${result.candidates.length} candidates, ${result.offers.length} offers, ${result.reviewSources.length} review sources`,
     );
-    expect(result.providerRuns.length).toBeGreaterThan(0);
+    assertUsefulLiveEvidence(result);
   }, 60_000);
 });

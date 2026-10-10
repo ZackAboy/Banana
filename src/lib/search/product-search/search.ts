@@ -1,55 +1,42 @@
-import { buildQueries, cleanQuery } from "./query";
-import { computeMatchSignals, dice, tokens } from "./signals";
-import {
-  extractModelNumbers,
-  matchModelNumber,
-  normalizeModelNumber,
-} from "./model-number";
+import "server-only";
+import { createHash } from "node:crypto";
+import { buildQueries, cleanQuery, queryIdentifiers } from "./query";
+import { computeMatchSignals, tokens } from "./signals";
+import { identifierObservations } from "./model-number";
 import { parsePrice } from "./price";
-import { canonicalizeUrl, hostOf, isHttpUrl } from "./url";
+import { canonicalizeUrl, hostOf, sanitizeRaw } from "./url";
 import { classifySource } from "./sources";
 import {
   ProviderError,
-  type OfferHit,
-  type PageHit,
-  type ProviderOutput,
-  type ReviewHit,
+  emptyOutput,
+  safeProviderError,
+  validateProviderOutput,
   type SearchProvider,
+  type ValidatedProviderOutput,
 } from "./provider";
-import type {
-  BuiltQuery,
-  DiscoveredReviewSource,
-  Evidence,
-  ExternalOffer,
-  ExternalProductCandidate,
-  OfferCondition,
-  ProductSearchQuery,
-  ProductSearchResult,
-  ProviderRef,
-  ProviderRun,
+import {
+  productSearchResultSchema,
+  type BuiltQuery,
+  type Evidence,
+  type ExternalOffer,
+  type ExternalProductCandidate,
+  type OfferCondition,
+  type ProductSearchQuery,
+  type ProductSearchResult,
+  type ProviderRef,
+  type ProviderRun,
+  type SourceObservation,
+  type DiscoveredReviewSource,
 } from "./types";
 
 export interface ProductSearchOptions {
-  /** Publicly reachable image URL for visual providers. Without it they are skipped. */
   imageUrl?: string | null;
-  /** Per-provider budget. A slow provider is reported, never awaited forever. */
   timeoutMs?: number;
-  /** Include each provider's raw payloads in the result. */
+  includeReviews?: boolean;
+  /** Sanitized debug payloads only; normalized observations are authoritative. */
   includeRaw?: boolean;
   now?: () => Date;
 }
-
-const DEFAULT_TIMEOUT_MS = 10_000;
-const SAME_ITEM_TITLE_OVERLAP = 0.5;
-
-/**
- * Run every provider concurrently and merge what they found. One provider
- * failing, timing out or being skipped never fails the search; its run is
- * recorded with the error and the other results are returned.
- *
- * Item order is provider order then response order. It is not a ranking, and
- * nothing here decides which candidate is correct.
- */
 export async function runProductSearch(
   input: ProductSearchQuery,
   providers: SearchProvider[],
@@ -57,44 +44,56 @@ export async function runProductSearch(
 ): Promise<ProductSearchResult> {
   const now = options.now ?? (() => new Date());
   const query = cleanQuery(input);
-  const queries = buildQueries(query);
+  const queries = buildQueries(query, options.includeReviews === true);
   const startedAt = now().toISOString();
-
   const runs = await Promise.all(
     providers.map((provider) =>
       runProvider(provider, query, queries, options, now),
     ),
   );
-
   const merger = new Merger(query);
-  for (const { provider, output, retrievedAt } of runs) {
-    if (!output) continue;
-    const ref = (queryId: string): ProviderRef => ({
-      provider: provider.id,
-      kind: provider.kind,
-      queryId,
-      retrievedAt,
-    });
-    output.pages.forEach((hit) => merger.addPage(hit, ref(hit.queryId)));
-    output.offers.forEach((hit) => merger.addOffer(hit, ref(hit.queryId)));
-    output.reviews.forEach((hit) => merger.addReview(hit, ref(hit.queryId)));
+  for (const { provider, output } of runs) {
+    const ref = (hit: {
+      queryId: string;
+      requestId: string | null;
+    }): ProviderRef => {
+      const request = output.requests.find((r) => r.id === hit.requestId);
+      return {
+        provider: provider.id,
+        kind: provider.kind,
+        engine: request?.engine ?? null,
+        queryId: hit.queryId,
+        requestId: hit.requestId,
+        retrievedAt: request?.retrievedAt ?? now().toISOString(),
+      };
+    };
+    for (const hit of output.pages) merger.addPage(hit, ref(hit));
+    // Shopping observations also supply candidate identities/images for retrieval.
+    for (const hit of output.offers) {
+      merger.addPage(hit, ref(hit));
+      merger.addOffer(hit, ref(hit));
+    }
+    for (const hit of output.reviews) merger.addReview(hit, ref(hit));
   }
-
-  const result: ProductSearchResult = {
+  const result = {
     query,
     queries,
     ...merger.finish(),
     providerRuns: runs.map((r) => r.run),
     startedAt,
     finishedAt: now().toISOString(),
+    ...(options.includeRaw
+      ? {
+          raw: Object.fromEntries(
+            runs.map((r) => [r.provider.id, r.output.raw.map(sanitizeRaw)]),
+          ),
+        }
+      : {}),
   };
-  if (options.includeRaw)
-    result.raw = Object.fromEntries(
-      runs.map((r) => [r.provider.id, r.output?.raw ?? []]),
-    );
-  return result;
+  const checked = productSearchResultSchema.safeParse(result);
+  if (!checked.success) throw new ProviderError("INVALID_RESPONSE");
+  return checked.data;
 }
-
 async function runProvider(
   provider: SearchProvider,
   query: ProductSearchQuery,
@@ -108,287 +107,325 @@ async function runProvider(
       : q.purpose === "product",
   );
   const controller = new AbortController();
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? provider.timeoutMs ?? 10_000;
   const started = performance.now();
+  let output = validateProviderOutput(emptyOutput());
+  let failure: ReturnType<typeof safeProviderError> | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      // Settle as TIMEOUT before aborting, so the provider's abort error loses the race.
-      reject(
-        new ProviderError("TIMEOUT", `No response within ${timeoutMs} ms.`),
-      );
-      controller.abort();
-    }, timeoutMs);
-  });
-  const base = {
-    provider: provider.id,
-    kind: provider.kind,
-    queryIds: relevant.map((q) => q.id),
-  };
   try {
-    if (!relevant.length && provider.kind !== "visual")
-      throw new ProviderError(
-        "SKIPPED",
-        "No usable query fields for this provider.",
-      );
-    const output = await Promise.race([
+    if (
+      (!relevant.length && provider.kind !== "visual") ||
+      (provider.kind === "reviews" && !options.includeReviews)
+    )
+      throw new ProviderError("SKIPPED");
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new ProviderError("TIMEOUT"));
+        controller.abort();
+      }, timeoutMs);
+    });
+    const result = await Promise.race([
       provider.search({
         query,
         queries: relevant,
         imageUrl: options.imageUrl ?? null,
         signal: controller.signal,
+        onProgress: (value) => {
+          if (!controller.signal.aborted)
+            output = validateProviderOutput(value);
+        },
       }),
       timeout,
     ]);
-    const run: ProviderRun = {
-      ...base,
-      status: "ok",
-      durationMs: Math.round(performance.now() - started),
-      itemCount:
-        output.pages.length + output.offers.length + output.reviews.length,
-      error: null,
-    };
-    return { provider, output, run, retrievedAt: now().toISOString() };
+    output = validateProviderOutput(result);
   } catch (error) {
-    const known = error instanceof ProviderError;
-    const run: ProviderRun = {
-      ...base,
-      status: known && error.code === "SKIPPED" ? "skipped" : "error",
-      durationMs: Math.round(performance.now() - started),
-      itemCount: 0,
-      error: {
-        code: known ? error.code : "PROVIDER_ERROR",
-        message: (error instanceof Error && error.message
-          ? error.message
-          : "Unknown provider failure."
-        ).slice(0, 300),
-      },
-    };
-    return {
-      provider,
-      output: null as ProviderOutput | null,
-      run,
-      retrievedAt: now().toISOString(),
-    };
+    failure = safeProviderError(error);
   } finally {
     clearTimeout(timer);
   }
+  // A timeout may interrupt a cascade after earlier completed requests. Preserve
+  // the validated snapshot and mark the actual outstanding request honestly.
+  for (const request of output.requests)
+    if (request.status === "pending") {
+      request.status = "error";
+      request.error =
+        failure ?? safeProviderError(new ProviderError("PROVIDER_ERROR"));
+      request.retrievedAt = now().toISOString();
+    }
+  // Never trust custom provider-supplied diagnostic text.
+  for (const request of output.requests)
+    if (request.error)
+      request.error = safeProviderError(new ProviderError(request.error.code));
+  const requestFailure = output.requests.find(
+    (r) => r.status === "error",
+  )?.error;
+  failure ??= requestFailure ?? null;
+  const itemCount =
+    output.pages.length + output.offers.length + output.reviews.length;
+  const successes = output.requests.some((r) => r.status === "ok");
+  const run: ProviderRun = {
+    provider: provider.id,
+    kind: provider.kind,
+    status:
+      failure?.code === "SKIPPED"
+        ? "skipped"
+        : failure
+          ? successes || itemCount > 0
+            ? "partial"
+            : "error"
+          : "ok",
+    queryIds: [
+      ...new Set(
+        output.requests.filter((r) => r.executed).map((r) => r.queryId),
+      ),
+    ],
+    requests: output.requests,
+    discardedRows: output.discardedRows,
+    durationMs: Math.round(performance.now() - started),
+    itemCount,
+    error: failure,
+  };
+  return { provider, output, run };
 }
 
-// ---------------------------------------------------------------------------
-
-interface CandidateDraft {
-  title: string;
-  brand: string | null;
-  urls: string[];
-  foundBy: ProviderRef[];
-  evidence: Evidence[];
-  texts: { title: string; snippet: string }[];
-}
-
-const pushUnique = <T>(list: T[], item: T, same: (a: T) => boolean) => {
-  if (!list.some(same)) list.push(item);
-};
-const sameRef = (a: ProviderRef, b: ProviderRef) =>
-  a.provider === b.provider && a.queryId === b.queryId;
-
+const unique = <T>(items: T[]): T[] => [
+  ...new Map(items.map((item) => [JSON.stringify(item), item])).values(),
+];
+const refKey = (ref: ProviderRef) => JSON.stringify(ref);
 function mapCondition(raw: string | null, title: string): OfferCondition {
-  const text = `${raw ?? ""} ${raw ? "" : title}`.toLowerCase();
-  if (/refurb|renewed|reconditioned|remanufactured/.test(text))
+  const value = (raw ?? title).toLowerCase();
+  if (/\b(?:not|non)[ -]+(?:new|used|refurbished|renewed)\b/.test(value))
+    return "unknown";
+  if (/\bopen[ -]box\b/.test(value)) return "open_box";
+  if (
+    /\b(?:refurbished|refurb|renewed|reconditioned|remanufactured)\b/.test(
+      value,
+    )
+  )
     return "refurbished";
-  if (/\bused\b|pre-?owned|second[- ]hand|open[- ]box/.test(text))
+  if (/\bused\b|\bpre[ -]?owned\b|\bsecond[ -]hand\b/.test(value))
     return "used";
-  if (raw && /\bnew\b/.test(text)) return "new";
+  // Only explicit provider condition wording supports new; title mentions don't.
+  if (raw && /^(?:brand[ -])?new(?: condition)?$/.test(value.trim()))
+    return "new";
   return "unknown";
 }
-
+type Page = ValidatedProviderOutput["pages"][number];
+type Offer = ValidatedProviderOutput["offers"][number];
+type Review = ValidatedProviderOutput["reviews"][number];
 class Merger {
-  private candidates = new Map<string, CandidateDraft>();
-  private offers: ExternalOffer[] = [];
+  private candidates = new Map<string, SourceObservation[]>();
+  private offers = new Map<string, ExternalOffer>();
   private reviews = new Map<string, DiscoveredReviewSource>();
-
   constructor(private readonly query: ProductSearchQuery) {}
-
-  addPage(hit: PageHit, ref: ProviderRef) {
-    if (!isHttpUrl(hit.url) || !hit.title.trim()) return;
-    const canonical = canonicalizeUrl(hit.url);
-    const draft = this.candidates.get(canonical) ?? {
-      title: hit.title.trim(),
-      brand: hit.brand,
-      urls: [],
-      foundBy: [],
-      evidence: [],
-      texts: [],
-    };
-    draft.brand ??= hit.brand;
-    pushUnique(draft.urls, hit.url, (u) => u === hit.url);
-    pushUnique(draft.foundBy, ref, (r) => sameRef(r, ref));
-    draft.texts.push({ title: hit.title, snippet: hit.snippet ?? "" });
-    for (const evidence of this.evidenceFor(hit, ref))
-      pushUnique(
-        draft.evidence,
-        evidence,
-        (e) =>
-          e.claim === evidence.claim &&
-          e.provider === evidence.provider &&
-          e.field === evidence.field &&
-          e.sourceUrl === evidence.sourceUrl,
-      );
-    this.candidates.set(canonical, draft);
-  }
-
-  /** Field-level observations: what in this source matches (or differs from) the query. */
-  private evidenceFor(hit: PageHit, ref: ProviderRef): Evidence[] {
+  private observation(hit: Page, ref: ProviderRef): SourceObservation {
     const fields = [
       { field: `${hit.field}.title`, text: hit.title },
       { field: `${hit.field}.snippet`, text: hit.snippet ?? "" },
-    ].filter((f) => f.text.trim());
-    const base = {
-      sourceUrl: hit.url,
-      provider: ref.provider,
-      queryId: ref.queryId,
-      retrievedAt: ref.retrievedAt,
+    ];
+    const identifiers = fields.flatMap(({ field, text }) =>
+      queryIdentifiers(this.query).flatMap((id) =>
+        identifierObservations(id, text, field),
+      ),
+    );
+    const present = new Set(tokens(`${hit.title}\n${hit.snippet ?? ""}`));
+    const mentioned = (value: string | undefined) =>
+      value &&
+      tokens(value).length &&
+      tokens(value).every((token) => present.has(token))
+        ? value
+        : null;
+    return {
+      ...ref,
+      field: hit.field,
+      title: hit.title,
+      url: hit.url,
+      domain: hostOf(hit.url),
+      position: hit.position,
+      snippet: hit.snippet,
+      imageUrls: hit.imageUrls,
+      providerProductId: hit.providerProductId,
+      urlType: hit.urlType,
+      brandClue: hit.brand ?? mentioned(this.query.brand),
+      variantClue: hit.variant ?? mentioned(this.query.variant),
+      identifiers,
     };
-    const out: Evidence[] = [];
-    const { modelNumber, brand } = this.query;
-    for (const { field, text } of fields) {
-      const add = (claim: string) =>
-        out.push({ ...base, claim, field, snippet: text });
-      if (modelNumber) {
-        const match = matchModelNumber(modelNumber, text);
-        const target = normalizeModelNumber(modelNumber);
-        if (match.exact)
-          add(`Exact model number "${modelNumber}" appears in source`);
-        for (const seen of match.seen) {
-          const normalized = normalizeModelNumber(seen);
-          if (normalized === target && !match.exact)
-            add(
-              `Model number variant "${seen}" matches "${modelNumber}" after normalisation`,
-            );
-          else if (match.suffixVariants.includes(seen))
-            add(
-              `Model number "${seen}" extends "${modelNumber}" with a suffix`,
-            );
-          else if (normalized !== target)
-            add(`Different model number "${seen}" appears in source`);
-        }
-      } else {
-        for (const seen of extractModelNumbers(text))
-          add(`Model number "${seen}" appears in source`);
-      }
-      const brandTokens = brand ? tokens(brand) : [];
-      const textTokens = new Set(tokens(text));
-      if (brandTokens.length && brandTokens.every((t) => textTokens.has(t)))
-        add(`Brand "${brand}" appears in source`);
-    }
-    if (!out.length)
-      out.push({
-        ...base,
-        claim:
-          "Returned for the query; no query field found in title or snippet",
-        field: hit.field,
-        snippet: hit.title,
-      });
-    return out;
   }
-
-  addOffer(hit: OfferHit, ref: ProviderRef) {
-    if (!isHttpUrl(hit.url) || !hit.title.trim() || !hit.merchant.trim())
+  addPage(hit: Page, ref: ProviderRef) {
+    const key = canonicalizeUrl(hit.url);
+    const list = this.candidates.get(key) ?? [];
+    list.push(this.observation(hit, ref));
+    this.candidates.set(key, list);
+  }
+  addOffer(hit: Offer, ref: ProviderRef) {
+    const source = this.observation(hit, ref);
+    const observation = {
+      ...source,
+      merchant: hit.merchant,
+      displayedPrice: hit.price,
+      currencyHint: hit.currencyHint,
+      displayedListPrice: hit.listPrice,
+      conditionText: hit.condition,
+      availability: hit.availability,
+      shipping: hit.shipping,
+    };
+    const canonicalUrl = canonicalizeUrl(hit.url);
+    // Equivalence is deliberately strict. Every material observed field must be
+    // identical; only known tracking parameters and provenance may differ.
+    const key = JSON.stringify({
+      ...observation,
+      provider: undefined,
+      kind: undefined,
+      engine: undefined,
+      queryId: undefined,
+      requestId: undefined,
+      retrievedAt: undefined,
+      position: undefined,
+      field: undefined,
+      url: canonicalUrl,
+    });
+    const existing = this.offers.get(key);
+    if (existing) {
+      existing.observations.push(observation);
+      existing.foundBy = unique([...existing.foundBy, ref]);
       return;
-    const canonical = canonicalizeUrl(hit.url);
-    const price = hit.price
-      ? parsePrice(hit.price, hit.currencyHint)
-      : { amountMinor: null, currency: hit.currencyHint, original: null };
-    const listPrice = hit.listPrice
-      ? parsePrice(hit.listPrice, price.currency ?? hit.currencyHint)
+    }
+    const price = parsePrice(hit.price ?? "", hit.currencyHint);
+    const list = hit.listPrice
+      ? parsePrice(hit.listPrice, hit.currencyHint)
       : null;
-    const offer: ExternalOffer = {
-      merchant: hit.merchant.trim(),
-      title: hit.title.trim(),
+    this.offers.set(key, {
+      merchant: hit.merchant,
+      title: hit.title,
       priceMinor: price.amountMinor,
       currency: price.currency,
-      originalPrice: price.original,
+      originalPrice: hit.price,
       listPriceMinor:
-        listPrice && listPrice.currency === price.currency
-          ? listPrice.amountMinor
-          : null,
+        list && list.currency === price.currency ? list.amountMinor : null,
       availability: hit.availability,
       condition: mapCondition(hit.condition, hit.title),
       shipping: hit.shipping,
       url: hit.url,
-      canonicalUrl: canonical,
+      canonicalUrl,
       foundBy: [ref],
-      matchSignals: computeMatchSignals(this.query, hit.title, ""),
-    };
-    const merchantKey = (o: ExternalOffer) =>
-      o.merchant.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const duplicate = this.offers.find(
-      (o) =>
-        o.canonicalUrl === canonical ||
-        (merchantKey(o) === merchantKey(offer) &&
-          o.priceMinor !== null &&
-          o.priceMinor === offer.priceMinor &&
-          o.currency === offer.currency &&
-          o.condition === offer.condition &&
-          // Same store and price is not enough: stores sell several items at one price.
-          dice(tokens(o.title), tokens(offer.title)) >=
-            SAME_ITEM_TITLE_OVERLAP),
-    );
-    if (duplicate) {
-      pushUnique(duplicate.foundBy, ref, (r) => sameRef(r, ref));
-      duplicate.availability ??= offer.availability;
-      duplicate.shipping ??= offer.shipping;
-      duplicate.listPriceMinor ??= offer.listPriceMinor;
-      return;
-    }
-    this.offers.push(offer);
+      observations: [observation],
+      matchSignals: computeMatchSignals(
+        this.query,
+        hit.title,
+        hit.snippet ?? "",
+      ),
+    });
   }
-
-  addReview(hit: ReviewHit, ref: ProviderRef) {
-    if (!isHttpUrl(hit.url) || !hit.title.trim()) return;
-    const canonical = canonicalizeUrl(hit.url);
-    const existing = this.reviews.get(canonical);
+  addReview(hit: Review, ref: ProviderRef) {
+    const canonicalUrl = canonicalizeUrl(hit.url);
+    // Preserve different review snippets/dates rather than silently coalescing.
+    const key = JSON.stringify([
+      canonicalUrl,
+      hit.title,
+      hit.snippet,
+      hit.publishedAt,
+    ]);
+    const existing = this.reviews.get(key);
+    const observation = this.observation(hit, ref);
     if (existing) {
-      pushUnique(existing.foundBy, ref, (r) => sameRef(r, ref));
-      existing.snippet ??= hit.snippet;
+      existing.observations.push(observation);
+      existing.foundBy = unique([...existing.foundBy, ref]);
       return;
     }
-    this.reviews.set(canonical, {
-      title: hit.title.trim(),
+    this.reviews.set(key, {
+      title: hit.title,
       url: hit.url,
-      canonicalUrl: canonical,
+      canonicalUrl,
       sourceType: classifySource(hit.url, this.query.brand),
       domain: hostOf(hit.url),
       snippet: hit.snippet,
       publishedAt: hit.publishedAt,
       foundBy: [ref],
+      observations: [observation],
     });
   }
-
+  private evidence(observation: SourceObservation): Evidence[] {
+    const entries = [
+      { field: `${observation.field}.title`, text: observation.title },
+      {
+        field: `${observation.field}.snippet`,
+        text: observation.snippet ?? "",
+      },
+    ].filter((e) => e.text);
+    return entries.map(({ field, text }) => ({
+      claim:
+        "Source text observation; identifier mentions do not establish product association.",
+      sourceUrl: observation.url,
+      provider: observation.provider,
+      queryId: observation.queryId,
+      requestId: observation.requestId,
+      field,
+      snippet: text,
+      retrievedAt: observation.retrievedAt,
+    }));
+  }
   finish() {
     const candidates: ExternalProductCandidate[] = [];
-    for (const [canonicalUrl, draft] of this.candidates) {
-      const title = draft.texts.map((t) => t.title).join("\n");
-      const text = draft.texts.map((t) => t.snippet).join("\n");
-      const matchSignals = computeMatchSignals(
-        this.query,
-        draft.title,
-        `${title}\n${text}`,
+    for (const [canonicalUrl, observations] of this.candidates) {
+      // Deterministic representative; all differing source observations survive.
+      observations.sort((a, b) =>
+        JSON.stringify(a).localeCompare(JSON.stringify(b)),
       );
+      const first = [...observations].sort((a, b) =>
+        a.title.localeCompare(b.title),
+      )[0];
+      const identifiers = unique(observations.flatMap((o) => o.identifiers));
+      const signals = observations.map((o) =>
+        computeMatchSignals(this.query, o.title, o.snippet ?? ""),
+      );
+      const matchSignals = {
+        ...computeMatchSignals(this.query, first.title, first.snippet ?? ""),
+        exactModelNumber:
+          signals[0].exactModelNumber === null
+            ? null
+            : signals.some((s) => s.exactModelNumber),
+        normalizedModelNumber:
+          signals[0].normalizedModelNumber === null
+            ? null
+            : signals.some((s) => s.normalizedModelNumber),
+        modelNumbersSeen: unique(signals.flatMap((s) => s.modelNumbersSeen)),
+        modelNumberSuffixVariants: unique(
+          signals.flatMap((s) => s.modelNumberSuffixVariants),
+        ),
+      };
       candidates.push({
-        title: draft.title,
-        brand: draft.brand,
+        id: `candidate_${createHash("sha256").update(canonicalUrl).digest("hex")}`,
+        title: first.title,
+        brand: first.brandClue,
+        variant: first.variantClue,
+        domain: first.domain,
+        imageUrls: unique(observations.flatMap((o) => o.imageUrls)).sort(),
+        identifierObservations: identifiers,
         modelNumbersSeen: matchSignals.modelNumbersSeen,
         canonicalUrl,
-        urls: draft.urls,
-        foundBy: draft.foundBy,
+        urls: unique(observations.map((o) => o.url)).sort(),
+        foundBy: unique(
+          observations.map(
+            ({ provider, kind, engine, queryId, requestId, retrievedAt }) => ({
+              provider,
+              kind,
+              engine,
+              queryId,
+              requestId,
+              retrievedAt,
+            }),
+          ),
+        ).sort((a, b) => refKey(a).localeCompare(refKey(b))),
+        observations,
         matchSignals,
-        evidence: draft.evidence,
+        evidence: observations.flatMap((o) => this.evidence(o)),
       });
     }
+    // TODO(ProductSearch): coordinate bounded candidate image acquisition/IDs with
+    // retrieval. No downloading or OCR/retrieval/fusion implementation here.
     return {
       candidates,
-      offers: this.offers,
+      offers: [...this.offers.values()],
       reviewSources: [...this.reviews.values()],
     };
   }

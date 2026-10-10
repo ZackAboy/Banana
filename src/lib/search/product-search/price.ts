@@ -74,31 +74,29 @@ function detectCurrency(text: string, hint: string | null): string | null {
   return hint;
 }
 
-/** Turn "1.234,56" / "1,234.56" / "59,99" / "7 980" into a decimal string. */
-function toDecimal(raw: string, fractionDigits: number): string | null {
-  const digits = raw.replace(/[\s\u00a0\u202f']/g, "");
-  const separators = digits.match(/[.,]/g) ?? [];
-  let integer = digits;
-  let fraction = "";
-  if (separators.length) {
-    const last = Math.max(digits.lastIndexOf("."), digits.lastIndexOf(","));
-    const tail = digits.slice(last + 1);
-    const mixed = new Set(separators).size > 1;
-    // One kind of separator, used once and followed by exactly three digits,
-    // is a thousands separator ("1,234" / "1.234"); so is any repeated one.
-    const thousandsOnly =
-      fractionDigits === 0 ||
-      (!mixed && (separators.length > 1 || tail.length === 3));
-    if (!thousandsOnly) {
-      integer = digits.slice(0, last);
-      fraction = tail;
-    }
-    integer = integer.replace(/[.,]/g, "");
+/** Parse one standalone displayed amount. Ambiguous formats stay unknown. */
+function toDecimal(raw: string, digits: number): string | null {
+  if (
+    /[\s']/.test(raw) &&
+    !/^\d{1,3}(?:[\s']\d{3})+(?:[.,]\d{1,2})?$/.test(raw)
+  )
+    return null;
+  const compact = raw.replace(/[\s\u00a0\u202f']/g, "");
+  if (/^\d+$/.test(compact)) return compact;
+  // Three-decimal currencies and fractional zero-decimal amounts are intentionally
+  // unsupported; interpreting their separators as thousands would be dangerous.
+  if (digits !== 2) {
+    return /^\d{1,3}(?:[.,]\d{3})+$/.test(compact) && digits === 0
+      ? compact.replace(/[.,]/g, "")
+      : null;
   }
-  if (!/^\d+$/.test(integer) || !/^\d*$/.test(fraction)) return null;
-  return fraction ? `${integer}.${fraction}` : integer;
+  if (/^\d+[.,]\d{1,2}$/.test(compact)) return compact.replace(",", ".");
+  if (/^\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$/.test(compact))
+    return compact.replace(/,/g, "");
+  if (/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(compact))
+    return compact.replace(/\./g, "").replace(",", ".");
+  return null;
 }
-
 export function parsePrice(
   original: string,
   currencyHint: string | null = null,
@@ -109,13 +107,37 @@ export function parsePrice(
     text,
     hint && isIsoCurrency(hint) ? hint : null,
   );
-  // First number only: ranges and "was/now" strings keep their first amount.
-  const number = text.match(/\d(?:[\d.,'\s\u00a0\u202f]*\d)?/);
-  if (!number || !currency) return { amountMinor: null, currency, original };
-  const exponent = minorUnitDigits(currency);
-  const decimal = toDecimal(number[0], exponent);
-  if (decimal === null) return { amountMinor: null, currency, original };
-  const amountMinor = Math.round(Number(decimal) * 10 ** exponent);
+  const unknown = { amountMinor: null, currency, original };
+  if (!currency || /[-−–—]/.test(text)) return unknown;
+  const explicitCodes =
+    text.match(/(?<![A-Za-z])[A-Z]{3}(?![A-Za-z])/g)?.filter(isIsoCurrency) ??
+    [];
+  if (new Set(explicitCodes).size > 1) return unknown;
+  const symbol = SYMBOLS.find(([notation]) => text.includes(notation));
+  if (symbol?.[1] && symbol[1] !== currency) return unknown;
+  if (symbol?.[0] === "$" && !DOLLAR_CURRENCIES.has(currency)) return unknown;
+  if (symbol?.[0] === "kr" && !KRONA_CURRENCIES.has(currency)) return unknown;
+  // Remove only currency notation and the provider's footnote marker. No prose,
+  // ranges, installment counts or "was/now" interpretation.
+  let amount = text.replace(/\*$/, "").trim();
+  amount = amount
+    .replace(new RegExp(`^${currency}\\s*|\\s*${currency}$`), "")
+    .trim();
+  const notation = SYMBOLS.find(
+    ([symbol]) => amount.startsWith(symbol) || amount.endsWith(symbol),
+  )?.[0];
+  if (notation)
+    amount = (
+      amount.startsWith(notation)
+        ? amount.slice(notation.length)
+        : amount.slice(0, -notation.length)
+    ).trim();
+  if (!/^\d[\d.,'\s]*$/.test(amount)) return unknown;
+  const decimal = toDecimal(amount, minorUnitDigits(currency));
+  if (decimal === null) return unknown;
+  const amountMinor = Math.round(
+    Number(decimal) * 10 ** minorUnitDigits(currency),
+  );
   return {
     amountMinor: Number.isSafeInteger(amountMinor) ? amountMinor : null,
     currency,

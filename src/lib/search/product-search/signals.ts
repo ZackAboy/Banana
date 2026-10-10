@@ -1,5 +1,10 @@
-import { extractModelNumbers, matchModelNumber } from "./model-number";
+import {
+  extractModelNumbers,
+  identifierObservations,
+  matchModelNumber,
+} from "./model-number";
 import type { MatchSignals, ProductSearchQuery } from "./types";
+import { queryIdentifiers } from "./query";
 
 const STOP_WORDS = new Set([
   "the",
@@ -48,15 +53,20 @@ export function computeMatchSignals(
 ): MatchSignals {
   const full = `${title}\n${text}`;
   const present = new Set(tokens(full));
-  const model = query.modelNumber
-    ? matchModelNumber(query.modelNumber, full)
-    : null;
+  const modelValue = queryIdentifiers(query).find(
+    (i) => i.kind === "model_number",
+  );
+  const model = modelValue ? matchModelNumber(modelValue.value, full) : null;
   const productTerms = [...new Set(tokens(query.product ?? ""))];
   const queryTokens = tokens(
     [query.brand, query.product, query.modelNumber].filter(Boolean).join(" "),
   );
   return {
-    exactModelNumber: model ? model.exact : null,
+    exactModelNumber: modelValue
+      ? identifierObservations(modelValue, full, "text").some(
+          (o) => o.match === "literal",
+        )
+      : null,
     normalizedModelNumber: model ? model.normalized : null,
     modelNumberSuffixVariants: model?.suffixVariants ?? [],
     modelNumbersSeen: model?.seen ?? extractModelNumbers(full),

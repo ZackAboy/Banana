@@ -1,7 +1,6 @@
-// URL canonicalisation for deduplication. The original URL is always kept
-// alongside the canonical one.
-
-const TRACKING_PARAMS = new Set([
+// Only well-known tracking keys are discarded. Variant/seller/path/protocol/
+// fragment distinctions survive; a canonical URL is not proof of one offer.
+const TRACKING = new Set([
   "gclid",
   "gclsrc",
   "dclid",
@@ -9,74 +8,21 @@ const TRACKING_PARAMS = new Set([
   "wbraid",
   "fbclid",
   "msclkid",
-  "yclid",
+  "srsltid",
   "mc_cid",
   "mc_eid",
-  "srsltid",
-  "_ga",
-  "_gl",
-  "ref",
-  "ref_",
-  "referrer",
-  "tag",
-  "affid",
-  "affiliate",
-  "clickid",
-  "irclickid",
-  "cmpid",
-  "spm",
-  "psc",
-  "th",
 ]);
-const TRACKING_PREFIXES = ["utm_", "pf_rd_", "pd_rd_", "_hs", "hsa_"];
-
-/** www./m./amp. and redd.it style hosts collapse onto the primary host. */
+const SENSITIVE =
+  /api[_-]?key|token|secret|password|authorization|credential|signature|^x-amz-|^x-goog-/i;
 export function normalizeHost(host: string): string {
   return host
     .toLowerCase()
     .replace(/\.$/, "")
-    .replace(/^(?:www\d?|m|mobile|amp|old)\./, "");
+    .replace(/^www\d?\./, "");
 }
-
-export function hostOf(url: string): string {
-  return normalizeHost(new URL(url).hostname);
+export function hostOf(value: string): string {
+  return normalizeHost(new URL(value).hostname);
 }
-
-export function canonicalizeUrl(input: string): string {
-  const url = new URL(input.trim());
-  url.protocol = "https:";
-  url.hostname = normalizeHost(url.hostname);
-  url.hash = "";
-  url.username = "";
-  url.password = "";
-  if (url.port === "443" || url.port === "80") url.port = "";
-
-  // Amazon product URLs carry slugs and ref paths; the ASIN is the identity.
-  const asin = url.hostname.startsWith("amazon.")
-    ? url.pathname.match(
-        /\/(?:dp|gp\/product|gp\/aw\/d)\/([A-Z0-9]{10})(?:[/?]|$)/i,
-      )
-    : null;
-  if (asin) {
-    url.pathname = `/dp/${asin[1].toUpperCase()}`;
-    url.search = "";
-    return url.toString();
-  }
-
-  const kept = [...url.searchParams.entries()]
-    .filter(([key]) => {
-      const k = key.toLowerCase();
-      return (
-        !TRACKING_PARAMS.has(k) &&
-        !TRACKING_PREFIXES.some((prefix) => k.startsWith(prefix))
-      );
-    })
-    .sort(([a], [b]) => a.localeCompare(b));
-  url.search = new URLSearchParams(kept).toString();
-  if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
-  return url.toString();
-}
-
 export function isHttpUrl(value: unknown): value is string {
   if (typeof value !== "string") return false;
   try {
@@ -84,4 +30,73 @@ export function isHttpUrl(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+/** Credential-bearing evidence URLs cannot safely be returned as source links. */
+export function isEvidenceUrl(value: unknown): value is string {
+  if (!isHttpUrl(value)) return false;
+  const url = new URL(value);
+  return (
+    !url.username &&
+    !url.password &&
+    ![...url.searchParams.keys()].some((k) => SENSITIVE.test(k))
+  );
+}
+export function canonicalizeUrl(input: string): string {
+  const url = new URL(input.trim());
+  const entries = [...url.searchParams.entries()].filter(
+    ([key]) =>
+      !TRACKING.has(key.toLowerCase()) && !key.toLowerCase().startsWith("utm_"),
+  );
+  entries.sort(
+    ([ak, av], [bk, bv]) => ak.localeCompare(bk) || av.localeCompare(bv),
+  );
+  url.search = new URLSearchParams(entries).toString();
+  return url.toString();
+}
+/** Safe Lens reference only; the full URL must never be echoed in results. */
+export function imageReferenceUrl(value: string): string {
+  const url = new URL(value);
+  url.username = "";
+  url.password = "";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+export function isPublicImageUrl(value: string): boolean {
+  if (!isHttpUrl(value)) return false;
+  const u = new URL(value);
+  const h = u.hostname.toLowerCase();
+  // No network resolution/fetch here. Provider still determines reachability.
+  return (
+    !u.username &&
+    !u.password &&
+    !h.includes(":") &&
+    h.includes(".") &&
+    !/^(?:localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(
+      h,
+    ) &&
+    !/\.(?:local|localhost)$/.test(h)
+  );
+}
+/** Debug output is allowlisted by the adapter; sanitize URL strings recursively. */
+export function sanitizeRaw(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeRaw);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([k]) => !SENSITIVE.test(k) && k !== "error")
+        .map(([k, v]) => [k, sanitizeRaw(v)]),
+    );
+  if (typeof value === "string" && isHttpUrl(value)) {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    for (const key of [...url.searchParams.keys()])
+      if (SENSITIVE.test(key)) url.searchParams.delete(key);
+    // Input image URLs may be nested/encoded in provider request links.
+    for (const [key, entry] of [...url.searchParams.entries()])
+      if (isHttpUrl(entry)) url.searchParams.set(key, imageReferenceUrl(entry));
+    return url.toString();
+  }
+  return value;
 }

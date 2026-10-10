@@ -1,288 +1,153 @@
-# External product search
+# External product evidence discovery
 
-Workstream: Product Search (`feature/product-search`). Starts from a **textual**
-product candidate and returns external evidence, offers and review sources. It
-does not identify products from images and never decides which candidate is
-correct. Fusion does that.
+Standalone server-only Search primitive; not wired into the application. Existing
+live application search/verification endpoints remain unimplemented. This module
+discovers source observations, not verified identity, final confidence or cheapest
+offers. It does no OCR, embeddings, Gemini reasoning or evidence fusion.
+
+## Input and output
 
 ```ts
-import { runProductSearch } from "@/lib/search/product-search";
-import { liveProductSearchProviders } from "@/lib/search/product-search/config";
-
 const result = await runProductSearch(
   {
     brand: "Sony",
     product: "DualSense Wireless Controller",
     modelNumber: "CFI-ZCT2W",
+    // sku, partNumber and variant are also optional.
+    // Alternatively: identifiers: [{ kind: "model_number", value: "CFI-ZCT2W" }]
   },
   liveProductSearchProviders(),
-  { imageUrl: null }, // Lens runs only with a public image URL
+  { includeReviews: false },
 );
 ```
 
-## Plan
+Import `runProductSearch` and module-local schemas/types from `./index`; import
+`liveProductSearchProviders` from `./config`. No shared application contracts change.
 
-1. Build queries: quoted model number + brand, then brand + product, then two
-   review-discovery queries.
-2. Run every provider concurrently, each with a timeout. Record a run per
-   provider (`ok`, `error` or `skipped`). One failure never fails the search.
-3. Providers return light hits (pages, offers, review links) plus raw payloads.
-   Everything else happens once, in `search.ts`, whichever provider ran:
-   - match signals and field-level evidence,
-   - price parsing,
-   - condition mapping,
-   - source classification,
-   - URL canonicalisation and deduplication.
-4. The output carries raw signals only: no status, verdict, score or ranking.
+Input preserves model/SKU/part-number kind and original identifier spelling.
+`identifiers` supports explicit `caseSensitive`; models default to case-insensitive,
+SKUs and part numbers to case-sensitive. At most eight identifier clues are allowed
+across typed inputs and shorthands. Serial-number inputs are not supported. Variant
+text narrows queries and remains a clue, not an established variant match.
 
-### Findings from live runs (SerpApi, 2026-10-10, DualSense query)
+Output is runtime validated and contains:
 
-- **The exact model query works well.** `"CFI-ZCT2W" Sony` returned 9
-  relevant pages, all but one containing the exact model number. That was
-  enough that the fallback query wasn't needed.
-- **Review queries use the product name, not the model number.** An unquoted
-  `… CFI-ZCT2W review` made Google return pages about "CFI" (flight
-  instructors, finance courses). A model number is used only when there's no
-  product name, and then it's quoted.
-- **`site:reddit.com` returned no Reddit results through SerpApi.** It
-  returned generic Sony pages instead. The plain keyword (`… reddit`) returned
-  9 Reddit threads.
-- **Google Shopping is noisy.** Offers link to Google product pages, not
-  merchants, and include unrelated listings (one at $2,899). Most shopping
-  titles don't contain the model number, so their
-  `matchSignals.exactModelNumber` is `false`. Fusion should use that signal
-  rather than trusting every offer.
-- **Different colours share one model number**, so they appear as separate
-  candidates with the same exact match (e.g. white, Starlight Blue,
-  Camouflage).
+- `candidates`: opaque deterministic IDs, title, source URLs/domain, image URLs,
+  typed identifier observations, brand/variant clues and per-source observations.
+- `offers`: displayed and safely parsed current/list prices, currency, merchant,
+  condition (`new`, `used`, `refurbished`, `open_box`, `unknown`), raw shipping/stock
+  wording where supplied, and original observations.
+- `providerRuns`: actual request records, executed query IDs, engine, timestamps,
+  discarded-row counts, status (`ok`, `partial`, `error`, `skipped`) and safe errors.
+- `queries`: planned queries, distinct from executed requests; optional sanitized
+  debug `raw` data. Review sources are returned only with explicit `includeReviews`.
 
-## Files
+A `literal` identifier observation requires safe token boundaries and preserves
+case policy. `CFI-ZCT2W-01`, `/01`, `_REV2`, `CFI-ZCT2WA`, `XCFI-ZCT2W` and
+`CFI-ZCT2WPRO` are not literal matches. Separator/case folding, when observed, is
+weaker `normalized` evidence; continuations may be `extension` observations.
+Unrelated neighboring tokens are never joined to manufacture identifiers.
+A mention in “Case for CFI-ZCT2W” or “Not compatible with CFI-ZCT2W” remains only a
+mention. Legacy `exactModelNumber` means literal occurrence, not verified identity;
+`modelNumbersSeen` contains untyped identifier-shaped tokens, not extracted facts.
 
-| File              | Purpose                                                            |
-| ----------------- | ------------------------------------------------------------------ |
-| `types.ts`        | Zod schemas and types for the module's output (see below)          |
-| `provider.ts`     | `SearchProvider` interface, hit shapes, errors, rate limiter       |
-| `search.ts`       | `runProductSearch`: orchestration, evidence, merge/dedupe          |
-| `query.ts`        | Query building                                                     |
-| `model-number.ts` | Model-number normalisation, extraction and variant matching        |
-| `signals.ts`      | Raw match signals between a query and a source                     |
-| `price.ts`        | Locale-tolerant price parsing into minor units                     |
-| `url.ts`          | URL canonicalisation                                               |
-| `sources.ts`      | Review source classification (reddit / review site / spec / other) |
-| `serpapi.ts`      | SerpApi adapters: web, shopping, Lens, reviews                     |
-| `config.ts`       | Env-driven configuration and live provider factory                 |
+Candidate IDs are SHA-256 of the conservatively canonicalized source URL, prefixed
+`candidate_`. They identify source groups, not canonical products. Same-URL
+conflicts remain in `observations`; the deterministic representative title and
+aggregate signals must not be treated as a resolved identity. Image URLs are
+retained when supplied and safe to expose; no image bytes are fetched.
 
-## Data model (`types.ts`)
+Offers merge only when every material observed field agrees, allowing known
+tracking URL differences and different request provenance. Every original
+observation survives a merge. Different models, variants, conditions, merchants,
+prices, currencies or meaningful URLs survive separately. Duplicate-looking
+offers are preferable to lost evidence. No cross-condition comparison is claimed.
 
-- **ProductSearchQuery**: `brand?`, `product?` and `modelNumber?`. Any of them
-  may be missing.
-- **ProviderRef**: `provider`, `kind` (web/shopping/visual/reviews), `queryId`
-  and `retrievedAt`. Every item carries one or more of these.
-- **MatchSignals**:
-  - `exactModelNumber` and `normalizedModelNumber`.
-  - `modelNumberSuffixVariants`.
-  - `modelNumbersSeen`: the original strings as written.
-  - `brandMatch`.
-  - `productTermsMatched` and `productTermsMissing`.
-  - `titleTokenOverlap`: a 0..1 Dice overlap, not a probability.
-  - `null` means the query lacked that field.
-- **Evidence**: `claim`, `sourceUrl`, `provider`, `queryId`, `field`
-  (e.g. `organic_results.snippet`), `snippet` and `retrievedAt`. Claims are
-  observations:
-  - "Exact model number … appears in source"
-  - "Model number variant … matches after normalisation"
-  - "… extends … with a suffix"
-  - "Different model number … appears in source"
-  - "Brand … appears in source"
-- **ExternalProductCandidate**:
-  - `title`, plus `brand` (only when a provider states it).
-  - `modelNumbersSeen`.
-  - `canonicalUrl`, plus `urls` (every original URL merged into it).
-  - `foundBy` (every provider/query that returned it).
-  - `matchSignals` and `evidence`.
-- **ExternalOffer**:
-  - `merchant` and `title`.
-  - `priceMinor` (integer minor units), `currency` (ISO 4217) and
-    `originalPrice` (the price string as shown).
-  - `listPriceMinor`, `availability`, `condition`
-    (new/used/refurbished/unknown) and `shipping`.
-  - `url` and `canonicalUrl`.
-  - `foundBy` and `matchSignals`.
-- **DiscoveredReviewSource**:
-  - `title`, `url` and `canonicalUrl`.
-  - `sourceType` (`reddit` | `review_site` | `manufacturer_spec` | `other`)
-    and `domain`.
-  - `snippet` and `publishedAt` (raw provider text, e.g. "3 months ago").
-  - `foundBy`.
-- **ProductSearchResult**:
-  - `query` (cleaned) and `queries` (built).
-  - `candidates`, `offers` and `reviewSources`.
-  - `providerRuns` (status, error code/message, duration, item count, query IDs
-    per provider).
-  - `startedAt` and `finishedAt`.
-  - Optional `raw` payloads, only with `includeRaw`.
+Prices with negatives, installments, bundles, ranges, mixed was/now wording or
+unsupported decimal formats retain their display text with a null normalized
+amount. Separate provider `old_price` may supply list price. Market currency hints
+resolve bare `$`/`kr`; no currency conversion occurs. Shipping/tax/stock are not
+fabricated, and discount tags are not stock information.
 
-Rules the code enforces:
+## Providers and limitations
 
-- **Conflicts are kept.** If Lens suggests a DualShock 4 and the model-number
-  search finds a DualSense, both candidates appear, each attributed to its
-  provider. Mismatching model numbers become explicit evidence.
-- **Currencies are never converted or guessed.** A bare `$` or `kr` resolves
-  only through the market currency hint (from `PRODUCT_SEARCH_COUNTRY`).
-  Otherwise `currency` is `null`. Minor-unit digits come from `Intl`, so JPY
-  has 0 and USD has 2.
-- **Model-number variants are signals, not merges.** `cfi zct2w` normalises to
-  match `CFI-ZCT2W`. `CFI-ZCT2W01` is reported as a suffix variant.
-  `CFI-ZCT1W` is a different model.
-- **Deduplication:**
-  - Candidates and review sources merge on canonical URL.
-  - Offers merge on canonical URL, or on the same merchant + price + currency
-    - condition.
-  - Merged items keep every `foundBy` entry.
-- **Canonical URLs:** `https` and a lower-case host without `www.`/`m.`/`old.`.
-  Tracking parameters are removed (`utm_*`, `gclid`, `fbclid`, `srsltid`,
-  `tag`, `ref`, …), the remaining parameters are sorted, and there is no
-  fragment or trailing slash. Amazon URLs reduce to `/dp/<ASIN>`.
-- **Order isn't a ranking.** Items appear in provider order, then response
-  order.
-- **Dropped hits:** hits without an http(s) URL or a title are dropped.
+SerpApi is a third-party service accessed via `https://serpapi.com/search.json`
+using a server-side `api_key`. Parsers remain engine-specific:
 
-## Provider interface (`provider.ts`)
+- [`google`](https://serpapi.com/search-api): first-page `organic_results` only.
+- [`google_shopping`](https://serpapi.com/google-shopping-api): shopping rows,
+  product IDs, imagery and condition. A `product_link` is labeled
+  `google_product_page`, not asserted to be merchant checkout.
+- [`google_lens`](https://serpapi.com/google-lens-api): optional public image URL;
+  uses `country`, preserves `exact_matches`/`visual_matches`/`organic_results`
+  origin, images and boolean stock. Lens “exact” sections do not mean exact model
+  evidence. No similarity score is invented.
 
-```ts
-interface SearchProvider {
-  id: string; // e.g. "serpapi:google_shopping"
-  kind: "web" | "shopping" | "visual" | "reviews";
-  search(input: {
-    query: ProductSearchQuery;
-    queries: BuiltQuery[]; // only those relevant to this kind, in priority order
-    imageUrl: string | null;
-    signal: AbortSignal; // aborted on timeout
-  }): Promise<{
-    pages: PageHit[];
-    offers: OfferHit[];
-    reviews: ReviewHit[];
-    raw: unknown[];
-  }>;
-}
-```
+Lens cannot consume local files/bytes here. No upload/hosting is implemented. An
+explicitly supplied public image URL is transmitted to SerpApi; its query/fragment
+are removed from returned references and a hash correlates the actual input.
+Obvious local/private URLs are rejected, but DNS reachability is not verified.
+Credential-bearing evidence/image URLs are omitted rather than exposed. Later
+bounded acquisition must map candidate ID + image URL to bytes for local SigLIP.
 
-- **Errors:** throw `ProviderError` with a code: `TIMEOUT`, `RATE_LIMITED`,
-  `AUTH`, `HTTP_ERROR`, `INVALID_RESPONSE`, `NOT_CONFIGURED` or
-  `PROVIDER_ERROR`. Throw `skip(message)` when the provider can't run for this
-  input (e.g. no image).
-- **Adding a source:** implement the interface. Fusion and the tests never
-  depend on which provider ran.
+Raw and normalized boundaries are validated. Bad individual rows are counted and
+discarded; malformed top-level payloads fail. Successful empty responses stay
+separate from failure. Earlier successful requests survive a later query failure
+or provider timeout. Errors use fixed sanitized messages and typed codes:
+`NOT_CONFIGURED`, `AUTH`, `TIMEOUT`, `RATE_LIMITED`, `HTTP_ERROR`,
+`INVALID_RESPONSE`, `PROVIDER_ERROR` (plus `SKIPPED`). HTTP status classification
+precedes JSON parsing. No failure falls back to demo data. No destination-page
+crawling, retries, pagination or result cache is implemented. Source classification
+uses a small domain allowlist, not brand substrings or authority scoring.
 
-## Environment variables
+## Configuration and request cost
 
-All of these are server-only. Never prefix them with `NEXT_PUBLIC_`.
+These module-local optional variables are documented here; shared `.env.example`
+continues to declare `SERPAPI_API_KEY` only. Credentials must stay server-side.
 
-| Variable                        | Default | Purpose                                                           |
-| ------------------------------- | ------- | ----------------------------------------------------------------- |
-| `SERPAPI_API_KEY`               | —       | Required for live search. Already declared in `.env.example`.     |
-| `PRODUCT_SEARCH_COUNTRY`        | `us`    | Google `gl` market; sets the currency hint for ambiguous symbols. |
-| `PRODUCT_SEARCH_LANGUAGE`       | `en`    | Google `hl`.                                                      |
-| `PRODUCT_SEARCH_TIMEOUT_MS`     | `10000` | Per-provider timeout.                                             |
-| `SERPAPI_MAX_REQUESTS_PER_HOUR` | `50`    | Local limiter; matches the free plan's hourly cap.                |
+| Variable                        | Default | Meaning                                             |
+| ------------------------------- | ------- | --------------------------------------------------- |
+| `SERPAPI_API_KEY`               | unset   | Required for live requests                          |
+| `PRODUCT_SEARCH_COUNTRY`        | `us`    | Search/Shopping `gl`, Lens `country`; currency hint |
+| `PRODUCT_SEARCH_LANGUAGE`       | `en`    | `hl`                                                |
+| `PRODUCT_SEARCH_TIMEOUT_MS`     | `10000` | Whole-provider cascade timeout                      |
+| `SERPAPI_MAX_REQUESTS_PER_HOUR` | `50`    | Process-local allowance per credential/endpoint     |
 
-Only `SERPAPI_API_KEY` is in `.env.example` today. The `PRODUCT_SEARCH_*` and
-`SERPAPI_MAX_REQUESTS_PER_HOUR` variables still need adding there, and that
-file is shared, so the change needs agreeing first.
+The allowance survives reconstructing adapters in the same process. It is not an
+account-wide/distributed quota and resets on process restart; other processes and
+external usage are not counted. Consult your actual plan before live calls.
+No pricing, sustainable daily quota or legal conclusions are asserted here.
 
-Without a key, each SerpApi provider records `NOT_CONFIGURED`. Nothing falls
-back to mock data.
+With the default four adapters, each textual engine makes one request per
+identifier, plus at most one product-name fallback if fewer than three hits were
+collected. All identifier queries execute unless a terminal error/time budget stops
+them. Reviews add at most two Google requests only when opted in. Lens adds one
+only with an image. Maximum: **21 requests** (eight identifiers + product fallback
+for each of web/Shopping, two reviews, one Lens). Default Sony example: **at most
+four**, or **five** with Lens; reviews are off. There are no automatic retries.
 
-## Tests and the opt-in live run
+## Verification
 
-`npm test` runs `tests/product-search/*.test.ts` against **real SerpApi
-responses** recorded on 2026-10-10 in
-`tests/product-search/fixtures/recorded/`:
+Normal `npm test` consumes zero external quota. Tests comprise pure units,
+handcrafted mocked HTTP/orchestration regressions, and supplied historical fixture
+replays. Existing fixture metadata claims live recording on 2026-10-10; that origin
+and historical observations have not been independently verified in this repair.
+Older fixtures omit imagery; handcrafted Lens cases cover retained imagery.
+Unexpected fixture/network requests fail the tests even if caught by the adapter.
+Replay success proves local behavior on those payloads, not current live behavior.
 
-- `dualsense-2026-10-10/`: the full query (brand + product + `CFI-ZCT2W`),
-  plus Lens on a
-  [public Wikimedia Commons DualSense photo](https://commons.wikimedia.org/wiki/File:Playstation_Dualsense_controller.jpg).
-- `dualsense-no-model-2026-10-10/`: the same query without a model number.
+The live smoke test is skipped unless `PRODUCT_SEARCH_LIVE=1`. It now requires
+schema-valid useful evidence linked to at least one successful executed provider
+request; all-provider failure or empty evidence fails honestly. **No live call was
+run during this repair.** The proposed default acceptance uses Google Search and
+Shopping for `"CFI-ZCT2W" Sony`, with at most one product fallback each (four
+requests maximum); no Lens or reviews. Expect sourced literal identifier mentions,
+candidates and, where supplied, imagery/offers. This does not prove association.
 
-Responses are trimmed by `tests/product-search/record.ts` to the fields the
-adapters read. SerpApi's request metadata and account details are dropped.
-Failure cases (an HTTP 500, a timeout) are injected around the recorded data;
-no responses are invented. A request without a recording fails the test.
-Global `fetch` is stubbed to throw, so any network access fails too.
-
-What the recordings exercise:
-
-- The exact model query finds `CFI-ZCT2W` listings.
-- Lens mostly matches the **DualSense Edge**, a real conflict that's kept
-  alongside the model-number results.
-- Web search and Lens return the same Apple listing under two URL spellings,
-  which are merged.
-- Shopping and Lens return the same PlayStation offer, which is merged.
-- Shopping also returns unrelated listings, flagged by
-  `exactModelNumber: false`.
-
-To refresh the recordings (about 6 searches):
-
-```bash
-PRODUCT_SEARCH_LIVE=1 PRODUCT_SEARCH_RECORD_DIR=tests/product-search/fixtures/recorded/dualsense-YYYY-MM-DD PRODUCT_SEARCH_IMAGE_URL=https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/Playstation_Dualsense_controller.jpg/1280px-Playstation_Dualsense_controller.jpg SERPAPI_API_KEY=... npx vitest run tests/product-search/live.test.ts
-```
-
-Lens returned nothing for the full-size Commons original but worked with the
-1280px thumbnail. Large images may silently produce empty Lens results.
-
-The live check is skipped unless explicitly enabled. In Git Bash:
-
-```bash
-PRODUCT_SEARCH_LIVE=1 SERPAPI_API_KEY=... npx vitest run tests/product-search/live.test.ts
-```
-
-Optional settings:
-
-- `PRODUCT_SEARCH_IMAGE_URL=https://…` also runs Lens.
-- `PRODUCT_SEARCH_QUERY='{"brand":"Sony","product":"…"}'` overrides the
-  development query.
-- `PRODUCT_SEARCH_LIVE_OUT=search.json` writes the full result, including raw
-  payloads, for inspection. It isn't trimmed, so don't commit it.
-- `PRODUCT_SEARCH_RECORD_DIR=…` saves trimmed, replayable fixtures.
-
-One run uses about 4–5 SerpApi searches, or one more with an image: 1–2 web
-searches when the fallback is needed, 1 shopping search, 2 review searches and
-1 Lens search.
-
-## Lens and search-provider options
-
-Google has no public Lens API, so every option scrapes Google results through a
-third party. Prices were checked in October 2026; verify them before buying.
-
-| Option                                                    | Lens?                                                                                    | Cost                                            | Limits                                                                          | Notes                                                                                                                                                                                                 |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [SerpApi](https://serpapi.com/pricing) (**implemented**)  | Yes, [`google_lens`](https://serpapi.com/google-lens-api) (`url` or uploaded `image_id`) | Free 250/mo; $25/1k, $75/5k, $150/15k per month | Free: 50/hour. Only successful searches billed; cached/failed free              | One key covers web, Shopping, Lens and reviews. Already named in `.env.example`. Shopping results may link to Google product pages rather than merchants. Offers a "U.S. Legal Shield" on paid plans. |
-| [SearchApi.io](https://www.searchapi.io/docs/google-lens) | Yes, `google_lens` (public image `url`); visual matches include `price`/`currency`       | ~$40/10k per month and up                       | Per plan                                                                        | Similar coverage to SerpApi; cheaper per search at volume. Zero data retention is enterprise-only.                                                                                                    |
-| Serper.dev                                                | Not confirmed from official docs                                                         | 2,500 free; ~$1/1k pay-as-you-go                | —                                                                               | Cheapest for plain web search; Lens availability unverified.                                                                                                                                          |
-| DataForSEO / Oxylabs                                      | Yes (search-by-image / `google_lens`)                                                    | Pay-per-task / enterprise contracts             | —                                                                               | Heavier onboarding; better for bulk.                                                                                                                                                                  |
-| Apify Lens actors                                         | Yes                                                                                      | ~$3–12.50 per 1k                                | Actor-dependent                                                                 | Community-maintained scrapers; reliability and ToS posture vary.                                                                                                                                      |
-| Google Custom Search JSON API                             | No                                                                                       | 100/day free, $5/1k                             | Closed to new customers; shuts down 1 Jan 2027; new engines limited to 50 sites | Not viable.                                                                                                                                                                                           |
-| Brave Search API                                          | No                                                                                       | ~$5 monthly credit (~1k searches), then $5/1k   | —                                                                               | Independent index (not Google). Terms restrict storing results.                                                                                                                                       |
-
-Sources for the figures above: SerpApi's pricing and Lens docs, SearchApi.io's
-Lens docs, and comparison posts from
-[scrapingdog](https://www.scrapingdog.com/blog/searchapi-alternatives/),
-[apiserpent](https://apiserpent.com/blog/serp-api-pricing-comparison),
-[cloro](https://cloro.dev/blog/google-custom-search-api-shutdown/) and
-[implicator.ai](https://www.implicator.ai/brave-drops-free-search-api-tier-puts-all-developers-on-metered-billing/).
-
-**Terms-of-service trade-off.** Google's terms prohibit automated access to its
-results. SERP APIs take on the scraping themselves and sell the results;
-SerpApi offers legal indemnity ("U.S. Legal Shield") on paid plans.
-
-**Recommendation.** Keep SerpApi as the first adapter: the repo already
-anticipates it, and one key covers all four provider kinds. The free tier is
-enough for development, at about 40 searches/day across 250/month.
-SearchApi.io is the most direct alternative and could be added as a second
-adapter behind the same interface. Adding any paid plan needs maintainer
-approval.
-
-**Image transport is still open.** Lens needs a publicly reachable image URL
-(or SerpApi's upload `image_id`). Uploading user photos to a third party has
-privacy implications and must be agreed before Lens runs on real images.
-Until then the Lens provider is skipped when no `imageUrl` is supplied.
+When explicitly authorized, run `PRODUCT_SEARCH_LIVE=1 npx vitest run
+tests/product-search/live.test.ts`. Optional `PRODUCT_SEARCH_QUERY` overrides clues;
+`PRODUCT_SEARCH_IMAGE_URL` enables Lens. `PRODUCT_SEARCH_LIVE_OUT` or
+`PRODUCT_SEARCH_RECORD_DIR` writes sanitized output/trimmed fixtures only in that
+opt-in run. Treat saved search text/URLs as potentially private. Exact billable
+quota depends on the provider plan/cache/outcomes; budget up to one credit per
+executed request, without relying on free or cached requests.

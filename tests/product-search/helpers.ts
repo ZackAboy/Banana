@@ -1,11 +1,16 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { vi } from "vitest";
+import { afterEach, expect, vi } from "vitest";
+import { createRateLimiter } from "@/lib/search/product-search/provider";
 import { createSerpApiProviders } from "@/lib/search/product-search/serpapi";
 
-// Tests replay real SerpApi responses recorded by live.test.ts on 2026-10-10
-// (trimmed by record.ts). Nothing here is invented; failure scenarios are
-// injected as HTTP errors around the recorded data.
+// Replay supplied historical fixtures. Their claimed live origin has not been
+// independently verified. Handcrafted failure/contract cases are labeled in tests.
+const unexpectedRequests: string[] = [];
+afterEach(() => {
+  const failures = unexpectedRequests.splice(0);
+  expect(failures, "Unexpected fixture/network requests").toEqual([]);
+});
 
 const RECORDED = join(__dirname, "fixtures", "recorded");
 
@@ -58,15 +63,33 @@ export function fixtureFetch(route: Route = recordedRoute) {
   const calls: URLSearchParams[] = [];
   const fetchImpl = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
-    if (url.hostname !== "serpapi.com")
-      throw new Error(`Unexpected network request to ${url.hostname}`);
+    if (url.hostname !== "serpapi.com") {
+      unexpectedRequests.push("Unexpected fixture host");
+      throw new Error("Unexpected fixture host");
+    }
+    const countryKey =
+      url.searchParams.get("engine") === "google_lens" ? "country" : "gl";
+    if (
+      url.searchParams.get(countryKey) !== "us" ||
+      url.searchParams.get("hl") !== "en" ||
+      url.searchParams.get("api_key") !== "test-key-not-real" ||
+      [...url.searchParams.keys()].some(
+        (key) =>
+          !["engine", countryKey, "hl", "api_key", "q", "url"].includes(key),
+      )
+    ) {
+      unexpectedRequests.push("Unexpected fixture request parameters");
+      throw new Error("Unexpected fixture request parameters");
+    }
     calls.push(url.searchParams);
     const body = route(url.searchParams);
     if (body instanceof Response) return body;
-    if (body === undefined)
-      throw new Error(
-        `No recording for ${url.searchParams.get("engine")} "${url.searchParams.get("q") ?? url.searchParams.get("url")}"`,
+    if (body === undefined) {
+      unexpectedRequests.push(
+        `No fixture for ${url.searchParams.get("engine")} ${url.searchParams.get("q") ?? "image"}`,
       );
+      throw new Error("Unexpected fixture request");
+    }
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -80,6 +103,7 @@ export function fixtureProviders(route?: Route, minResults?: number) {
   const providers = createSerpApiProviders({
     apiKey: "test-key-not-real",
     fetch: fetchImpl,
+    acquire: createRateLimiter(50, 3_600_000),
     minResultsBeforeFallback: minResults,
   });
   return { providers, calls };
@@ -88,6 +112,7 @@ export function fixtureProviders(route?: Route, minResults?: number) {
 /** Any real fetch during a test is a bug: fail loudly instead of reaching out. */
 export function blockNetwork() {
   vi.stubGlobal("fetch", () => {
+    unexpectedRequests.push("Real network access attempted");
     throw new Error("Network access is not allowed in product-search tests");
   });
   return () => vi.unstubAllGlobals();
