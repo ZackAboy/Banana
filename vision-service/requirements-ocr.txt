@@ -1,0 +1,7 @@
+# Optional OCR-only environment; does not change the shared default install.
+# Validated on CPython 3.11 / macOS arm64. Model weights live in PaddleX's cache.
+paddleocr==3.3.2
+paddlex[ocr-core]==3.3.13
+paddlepaddle==3.2.2
+numpy>=1.26,<3
+pillow>=11,<13

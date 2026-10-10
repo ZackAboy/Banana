@@ -1,0 +1,88 @@
+{
+  "schema_version": "ocr.v1",
+  "source": "paddleocr",
+  "engine_version": "3.3.2",
+  "detection_model": "PP-OCRv5_mobile_det",
+  "recognition_model": "en_PP-OCRv5_mobile_rec",
+  "images": [
+    {
+      "source_image_index": 1,
+      "width": 1000,
+      "height": 320,
+      "coordinate_space": "exif_transposed_pixels",
+      "outcome": "text_detected",
+      "label_role": "unknown",
+      "label_role_basis": "not_assessed",
+      "regions": [
+        {
+          "region_index": 1,
+          "raw_text": "SONY",
+          "normalized_text": "SONY",
+          "polygon": [
+            [38.0, 39.0],
+            [160.0, 39.0],
+            [160.0, 82.0],
+            [38.0, 82.0]
+          ],
+          "recognition_confidence": 0.9998850226402283
+        },
+        {
+          "region_index": 2,
+          "raw_text": "WIRELESS CONTROLLER",
+          "normalized_text": "WIRELESS CONTROLLER",
+          "polygon": [
+            [38.0, 108.0],
+            [542.0, 108.0],
+            [542.0, 148.0],
+            [38.0, 148.0]
+          ],
+          "recognition_confidence": 0.9952442646026611
+        },
+        {
+          "region_index": 3,
+          "raw_text": "MODEL CFI-ZCT2W",
+          "normalized_text": "MODEL CFI-ZCT2W",
+          "polygon": [
+            [39.0, 177.0],
+            [431.0, 177.0],
+            [431.0, 215.0],
+            [39.0, 215.0]
+          ],
+          "recognition_confidence": 0.9898878931999207
+        }
+      ],
+      "identifiers": [
+        {
+          "source_image_index": 1,
+          "kind": "model_number",
+          "value": "CFI-ZCT2W",
+          "extraction": "explicit_label",
+          "label": "MODEL",
+          "label_span": {
+            "region_index": 3,
+            "start": 0,
+            "end": 5
+          },
+          "value_span": {
+            "region_index": 3,
+            "start": 6,
+            "end": 15
+          }
+        }
+      ],
+      "brand_clues": [
+        {
+          "source_image_index": 1,
+          "value": "SONY",
+          "kind": "brand",
+          "extraction": "standalone_allowlist",
+          "value_span": {
+            "region_index": 1,
+            "start": 0,
+            "end": 4
+          }
+        }
+      ]
+    }
+  ]
+}
