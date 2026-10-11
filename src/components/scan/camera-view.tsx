@@ -20,7 +20,7 @@ export interface UploadPreview {
   file: File;
   url: string;
 }
-const ACCEPT = "image/jpeg,image/png,image/webp";
+const ACCEPT = "image/*";
 
 export function CameraView({
   images,
@@ -43,24 +43,14 @@ export function CameraView({
 }) {
   const gallery = useRef<HTMLInputElement>(null);
   const native = useRef<HTMLInputElement>(null);
-  const { videoRef, status, supported, start, flip, capture } = useCamera(true);
+  const { videoRef, status, supported, start, flip } = useCamera(true);
   const [dragging, setDragging] = useState(false);
-  const [flash, setFlash] = useState(0);
   const full = images.length >= MAX_IMAGES;
   const live = status === "live";
 
   const pick = (files: FileList | null) => {
     if (files?.length) onAdd(Array.from(files));
   };
-  async function shoot() {
-    if (full) return;
-    if (live) {
-      setFlash((n) => n + 1);
-      const file = await capture();
-      if (file) return onAdd([file]);
-    }
-    native.current?.click();
-  }
 
   return (
     <div
@@ -118,12 +108,6 @@ export function CameraView({
       />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-36 bg-gradient-to-b from-black/60 to-transparent" />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-72 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
-      {flash > 0 && (
-        <div
-          key={flash}
-          className="animate-flash pointer-events-none absolute inset-0 bg-white"
-        />
-      )}
 
       {/* Top bar */}
       <header className="absolute inset-x-0 top-0 z-10 flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),14px)]">
@@ -252,7 +236,7 @@ export function CameraView({
 
           <button
             type="button"
-            onClick={() => void shoot()}
+            onClick={() => native.current?.click()}
             disabled={full}
             aria-label={
               images.length ? "Scan with another photo" : "Scan a product"

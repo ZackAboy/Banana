@@ -82,11 +82,11 @@ export function ShoppingAssistant() {
     clearAnalysis();
     const next = [
       ...previewRef.current,
-      ...files.map((file) => ({
-        id: crypto.randomUUID(),
-        file,
-        url: URL.createObjectURL(file),
-      })),
+      ...files.map((file) => {
+        // Blob URLs are unique and work on HTTP LAN origins too.
+        const url = URL.createObjectURL(file);
+        return { id: url, file, url };
+      }),
     ];
     setPreviews(next);
     void analyze(next);

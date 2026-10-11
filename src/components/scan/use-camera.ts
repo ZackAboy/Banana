@@ -21,7 +21,11 @@ export function useCamera(active: boolean) {
   const [facing, setFacing] = useState<"environment" | "user">("environment");
   const supported = useSyncExternalStore(
     noop,
-    () => !!navigator.mediaDevices?.getUserMedia,
+    // Use native file capture on iOS, including iPads with a desktop user agent.
+    () =>
+      !/iPhone|iPad|iPod/.test(navigator.userAgent) &&
+      !(navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) &&
+      !!navigator.mediaDevices?.getUserMedia,
     () => false,
   );
 
@@ -33,7 +37,7 @@ export function useCamera(active: boolean) {
 
   const start = useCallback(
     async (mode = facing) => {
-      if (!navigator.mediaDevices?.getUserMedia) return;
+      if (!supported) return;
       stop();
       const generation = generationRef.current;
       setStatus("starting");
@@ -61,12 +65,12 @@ export function useCamera(active: boolean) {
         if (generation === generationRef.current) setStatus("blocked");
       }
     },
-    [facing, stop],
+    [facing, stop, supported],
   );
 
   // Resume automatically only when permission was granted before; never prompt on load.
   useEffect(() => {
-    if (!active) return;
+    if (!active || !supported) return;
     let cancelled = false;
     navigator.permissions
       ?.query({ name: "camera" as PermissionName })
@@ -80,7 +84,7 @@ export function useCamera(active: boolean) {
       setStatus("off");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active]);
+  }, [active, supported]);
 
   const flip = useCallback(() => {
     const next = facing === "environment" ? "user" : "environment";
