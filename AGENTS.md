@@ -95,9 +95,8 @@ independently redesign shared architecture.
 5. Do not change another workstream's implementation for stylistic reasons.
 6. Prefer adding functionality behind existing interfaces to changing interfaces.
 7. Never commit API keys or secrets. Keep provider credentials server-side.
-8. Run `npm run check` before finishing; follow the automated validation policy
-   below. Report failures or unavailable checks
-   accurately and never claim verification that was not performed.
+8. Follow the standard feature workflow and automated validation policy below.
+   Report failures or unavailable checks accurately; never claim unperformed checks.
 9. Report exactly which files you modified.
 10. Report every shared contract changed, or explicitly state that none changed.
 11. Report assumptions made about another workstream.
@@ -121,19 +120,17 @@ when comparing offers.
 
 ## AUTOMATED VALIDATION POLICY
 
-- `npm run check` is the canonical offline repository validation command. Agents
-  must run it before considering implementation complete. CI runs the same command.
+- `npm run check` is the canonical offline repository validation command.
+  CI runs the same command.
 - It covers Vitest unit/integration tests, the production build, typecheck, lint,
-  format check, and Playwright E2E tests. Ordinary implementation agents do not
-  need to separately run `npm test`, `npm run typecheck`, `npm run lint`,
-  `npm run format:check`, `npm run build`, or `npm run test:e2e` after it succeeds.
+  format check, and Playwright E2E tests.
 - Add feature-specific tests to the existing suites so discovery includes them
   automatically. When introducing a new automated suite/check that should protect
   the repository, update `npm run check` in the same change so CI includes it.
 - Do not introduce undocumented/manual validation commands that developers must
   remember. Document any required test setup in `CONTRIBUTING.md`.
-- Live/network/model tests remain explicit opt-in and must not enter default CI
-  unless intentionally redesigned for CI. The canonical command disables live
+- Live/network/model tests remain explicit opt-in and must not become required
+  default validation. The canonical command disables live
   tests and forces mock services, without requiring credentials or `.env.local`.
 - Do not weaken or remove checks merely to make CI green; diagnose failures and
   report any checks that could not run.
@@ -172,24 +169,35 @@ serialize responses, and handle errors. Cross-workstream calls use agreed public
 service/provider interfaces and shared domain types. Keep environment/model
 selection centralized and retain the ability to run without real API keys.
 
-## Git workflow
+## Standard feature workflow
 
-Use one feature branch per workstream as a starting convention:
+Unless the user explicitly requests otherwise:
 
-- OCR: `feature/vision-ocr`
-- Visual retrieval: `feature/visual-retrieval`
-- Product search: `feature/product-search`
-
-All three branches start at the same validated shared baseline. Do not push or
-delete remote branches without an explicit publishing instruction.
+1. Start from a clean, up-to-date `main`: inspect branch/status, fetch
+   `origin --prune`, and verify `main` matches `origin/main`. Stop and report
+   unexpected local work or divergence; never overwrite or discard it.
+2. Create a narrowly named branch: `feature/<name>` for product work,
+   `fix/<name>` for fixes, or `chore/<name>` for repository/tooling work.
+   Use the workstream branch names above when assigned to those workstreams.
+3. Implement only the requested scope and add/update appropriate automated tests.
+   Follow the automated validation policy above for new checks and opt-in live tests.
+4. Before considering implementation complete, run `npm run check`. Do not rerun
+   its constituent checks unless debugging a failure. Run `git diff --check` if
+   the local canonical command does not already cover it.
+5. Review `git diff` and `git status` for accidental files, secrets, `.env.local`,
+   model caches, virtual environments, build artifacts, screenshots, and other
+   local artifacts. Stage explicit files/hunks and inspect the staged diff.
+6. After validation passes, commit with a clear conventional-style message and
+   push the feature branch. Do not merge into `main` automatically. Deleting
+   remote branches requires an explicit instruction.
+7. Finish with the PR-ready handoff below, including validation and publishing status.
 
 Use separate checkouts or worktrees when agents work concurrently so branch
 switches and working-tree edits do not interfere. Each agent should commit only
 work relevant to its assignment, including necessary, documented shared changes.
-Stage explicit files or hunks; inspect the staged diff for unrelated edits and
-secrets. Avoid direct changes to `main` during concurrent development. Integrate
-through focused PRs, coordinating shared contract changes before dependent work
-merges. Do not independently redesign shared architecture on multiple branches.
+Avoid direct changes to `main`. Integrate through focused PRs, coordinating shared
+contract changes before dependent work merges. Do not independently redesign
+shared architecture on multiple branches.
 
 ## Agent handoff
 
@@ -197,8 +205,9 @@ End each task with a concise handoff containing:
 
 - What was implemented
 - Exact files changed
-- Tests executed and their results
+- Tests added/changed and executed, including the `npm run check` result
 - Build/typecheck status, including checks not run and why
+- Commit hash, branch name, and push status
 - Shared contracts changed, or `None`
 - Assumptions about other workstreams, or `None`
 - TODOs for other workstreams, including the responsible owner
