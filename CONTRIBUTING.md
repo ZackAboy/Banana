@@ -37,25 +37,35 @@ becoming a synthetic success.
 
 ## Checks before merging
 
-Use Node 24 LTS and `npm ci`, then run:
+Use Node 24 LTS (`.nvmrc`) and a POSIX shell (macOS/Linux). Install dependencies
+and the headless Chromium browser used by the existing Playwright configuration:
 
 ```sh
-npx next typegen       # Generate ignored Next.js declarations on a fresh checkout
-npm run format:check
-npm run typecheck
-npm run lint
-npm test
-npm run build
-npm run test:e2e
+npm ci
+npx playwright install --with-deps --only-shell chromium
+npm run check
 ```
+
+Browser/system dependency setup is needed after installing or upgrading Playwright,
+not before each check. `npm run check` is the canonical offline validation command;
+CI runs it too. It builds before typecheck/E2E to generate Next.js declarations and
+the production server, disables both opt-in live suites, and forces mock services.
+It sets `CI=1` so E2E starts a fresh production server rather than reusing a possibly
+live development server. Port 3000 must be available. No `.env.local`, credentials,
+Python environment, or local models are required.
+
+Do not repeat the individual test/typecheck/lint/format/build/E2E commands after
+`npm run check` succeeds. Follow the [automated validation policy](AGENTS.md#automated-validation-policy)
+when adding tests or checks. Git whitespace validation remains a separate
+`git diff --check` step in CI.
 
 For the independent health-only service, follow `vision-service/README.md` and run
 its pytest suite, Ruff lint, and Ruff formatting check. Python static type checking
 is not configured yet. Coordinate inference HTTP contracts and dependency extras
 before implementing adapters. The Next.js app does not require Python to run.
 
-Install Chromium once with `npx playwright install chromium`. Keep tests focused
-on contracts and meaningful behavior. Report checks not run and why. Verify the
+Keep tests focused on contracts and meaningful behavior. Report checks not run
+and why. Verify the
 demo works without API keys and preserves the additional-image flow. Check the
 staged diff for secrets and unrelated changes before committing.
 

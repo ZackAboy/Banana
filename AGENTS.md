@@ -95,8 +95,8 @@ independently redesign shared architecture.
 5. Do not change another workstream's implementation for stylistic reasons.
 6. Prefer adding functionality behind existing interfaces to changing interfaces.
 7. Never commit API keys or secrets. Keep provider credentials server-side.
-8. Run relevant tests and TypeScript checks before finishing. Run relevant lint
-   and build checks when available; report failures or unavailable checks
+8. Run `npm run check` before finishing; follow the automated validation policy
+   below. Report failures or unavailable checks
    accurately and never claim verification that was not performed.
 9. Report exactly which files you modified.
 10. Report every shared contract changed, or explicitly state that none changed.
@@ -118,6 +118,28 @@ evidence from AI interpretation, and preserve `confirmed`, `likely`, and
 probability. Support additional images when evidence is insufficient. Match
 product variants and distinguish new, used, refurbished, and unknown conditions
 when comparing offers.
+
+## AUTOMATED VALIDATION POLICY
+
+- `npm run check` is the canonical offline repository validation command. Agents
+  must run it before considering implementation complete. CI runs the same command.
+- It covers Vitest unit/integration tests, the production build, typecheck, lint,
+  format check, and Playwright E2E tests. Ordinary implementation agents do not
+  need to separately run `npm test`, `npm run typecheck`, `npm run lint`,
+  `npm run format:check`, `npm run build`, or `npm run test:e2e` after it succeeds.
+- Add feature-specific tests to the existing suites so discovery includes them
+  automatically. When introducing a new automated suite/check that should protect
+  the repository, update `npm run check` in the same change so CI includes it.
+- Do not introduce undocumented/manual validation commands that developers must
+  remember. Document any required test setup in `CONTRIBUTING.md`.
+- Live/network/model tests remain explicit opt-in and must not enter default CI
+  unless intentionally redesigned for CI. The canonical command disables live
+  tests and forces mock services, without requiring credentials or `.env.local`.
+- Do not weaken or remove checks merely to make CI green; diagnose failures and
+  report any checks that could not run.
+
+See [validation setup](CONTRIBUTING.md#checks-before-merging). CI also runs
+`git diff --check` separately for Git whitespace errors.
 
 ## Integration principle
 
