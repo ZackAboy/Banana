@@ -6,6 +6,7 @@
     "node": "^22.22.2 || >=24.15.0"
   },
   "scripts": {
+    "check": "export PRODUCT_SEARCH_LIVE=0 REVIEW_INTELLIGENCE_LIVE=0 USE_MOCK_SERVICES=true CI=1 && npm test && npm run build && npm run typecheck && npm run lint && npm run format:check && npm run test:e2e",
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",

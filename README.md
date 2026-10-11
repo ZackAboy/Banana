@@ -213,6 +213,7 @@ not packaged for Vercel/serverless deployment.
 ## Commands and verification
 
 ```sh
+npm run check         # Canonical offline validation, including build and E2E
 npm run dev           # Local development
 npm run build         # Production build (webpack, no remote fonts needed)
 npm start             # Serve a completed production build
@@ -222,9 +223,16 @@ npm test              # Vitest schema/utility/cache/API integration tests
 npm run test:watch
 npm run format:check
 npm run format
-npx playwright install chromium  # Once, for browser tests
+npx playwright install --with-deps --only-shell chromium  # Browser setup
 npm run test:e2e       # Starts production server if needed; run build first
 ```
+
+Use `npm run check` before considering implementation complete; CI runs the same
+command. It covers the individual checks listed above, so they do not need to be
+run separately afterward. It forces mock services, disables opt-in live tests,
+and needs no `.env.local`, API keys, or models. Build runs before typecheck/E2E;
+port 3000 must be free for the fresh mock server. See [validation setup](CONTRIBUTING.md#checks-before-merging)
+and the [automated validation policy](AGENTS.md#automated-validation-policy).
 
 Browser tests cover the confirmed demo, additional-image flow, candidate choice,
 mobile layout, appearance toggle, invalid input/removal, and independent review
