@@ -94,11 +94,17 @@ function sourceBrand(
 /** Source IDs are groups: never select the representative title over another
  * observation. Different wording remains unresolved; no alias inference. */
 export function searchGroupHasConflict(candidate: ExternalProductCandidate) {
+  // Lens rows are discovery hypotheses, not reviewed exact-ID associations.
+  // Their wording is reconciled by semantic Fusion; a noisy visual title must
+  // not erase a qualifying physical + textual identifier association.
+  const observations = candidate.observations.filter(
+    (o) => o.kind !== "visual",
+  );
   // Do not accept the nicest title while a second observation negates it or
   // describes a compatibility target. Different prose is left unresolved too.
   if (
-    candidate.observations.length > 1 &&
-    candidate.observations.some(
+    observations.length > 1 &&
+    observations.some(
       (o) =>
         ambiguousSubject.test(o.title) ||
         o.identifiers.some((id) =>
@@ -117,12 +123,10 @@ export function searchGroupHasConflict(candidate: ExternalProductCandidate) {
     "brandClue",
     "variantClue",
   ] as const) {
-    const values = candidate.observations
-      .map((o) => o[field])
-      .filter((v) => v?.trim());
+    const values = observations.map((o) => o[field]).filter((v) => v?.trim());
     if (new Set(values.map((v) => comparable(v!))).size > 1) return true;
   }
-  const identifiers = candidate.observations.flatMap((o) => o.identifiers);
+  const identifiers = observations.flatMap((o) => o.identifiers);
   return identifiers.some((a, index) =>
     identifiers.slice(index + 1).some((b) => {
       if (a.kind !== b.kind) return false;
@@ -364,8 +368,11 @@ function deriveAssociations(
       return [];
     }
     return candidate.observations.flatMap((observation, observationIndex) =>
-      subjectAssociation(observation, result.query.brand, (reason) =>
-        reject?.({ candidateId: candidate.id, observationIndex, reason }),
+      (observation.kind === "visual"
+        ? []
+        : subjectAssociation(observation, result.query.brand, (reason) =>
+            reject?.({ candidateId: candidate.id, observationIndex, reason }),
+          )
       ).map(({ identity, identifier, basis }) => ({
         candidateId: candidate.id,
         observationIndex,

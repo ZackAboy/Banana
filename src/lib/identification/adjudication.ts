@@ -13,9 +13,186 @@ import type {
   FusionResult,
   MissingEvidenceType,
 } from "./evidence-contracts";
+import {
+  identifySemanticProduct,
+  sameProductFamily,
+} from "./semantic-products";
+import { identifierObservations } from "@/lib/search/product-search";
 
 /** No scores, source counts or Gemini status participate in confirmation. */
 export function fuseProductEvidence(input: FusionInput): FusionResult {
+  const result = adjudicateIdentifiers(input);
+  const evidence = adaptEvidence(input);
+  const semantic = identifySemanticProduct(input, evidence);
+  const exact = result.status === "confirmed";
+  result.identityResolution = {
+    granularity: exact
+      ? "exact_model"
+      : result.identity?.productName
+        ? "product_family"
+        : null,
+    productFamily: result.identity?.productName ?? null,
+    unresolvedFields: [],
+    evidence: [],
+  };
+  if (semantic) {
+    const productConflict =
+      evidence.physical.length > 0 &&
+      result.identity?.productName &&
+      !sameProductFamily(result.identity.productName, semantic.family);
+    if (productConflict || semantic.familyConflict) {
+      result.conflictingEvidence.push({
+        code: semantic.familyConflict
+          ? "physical_product_family_conflict"
+          : "physical_semantic_product_conflict",
+        evidenceRefs: [...result.supportingEvidence, ...semantic.refs],
+        material: true,
+      });
+      result.reasonCodes.push(
+        semantic.familyConflict
+          ? "physical_product_family_conflict"
+          : "physical_semantic_product_conflict",
+      );
+      result.status = "uncertain";
+      result.needsMoreEvidence = true;
+      result.missingEvidenceType = "conflict_resolution";
+      result.followUpReason = semantic.familyConflict
+        ? "Physical wording and external candidates support conflicting product families."
+        : "The physical product wording conflicts with the identifier's external product association.";
+      result.followUpOwner = "fusion";
+    } else if (!exact) {
+      // A variant disagreement can limit precision without erasing the family.
+      for (const conflict of result.conflictingEvidence) {
+        if (
+          conflict.code === "source_group_identity_conflict" &&
+          conflict.evidenceRefs.every((ref) => semantic.refs.includes(ref))
+        )
+          conflict.material = false;
+      }
+      const blocked = result.conflictingEvidence.some(
+        (conflict) => conflict.material || conflict.code === "visual_concern",
+      );
+      if (!blocked) {
+        result.status = "confirmed";
+        result.identity = {
+          brand: semantic.brand,
+          productName: semantic.productName,
+          variant: semantic.variant,
+          modelNumber: null,
+          sku: null,
+          partNumber: null,
+        };
+        result.supportingEvidence = [
+          ...new Set([...result.supportingEvidence, ...semantic.refs]),
+        ].sort();
+        result.reasonCodes = result.reasonCodes.filter(
+          (code) =>
+            ![
+              "exact_identity_not_established",
+              "independent_external_agreement_missing",
+              "ambiguous_candidates",
+            ].includes(code),
+        );
+        result.reasonCodes.push("physical_wording_external_product_agreement");
+        result.needsMoreEvidence = false;
+        result.missingEvidenceType = null;
+        result.followUpReason = null;
+        result.followUpOwner = null;
+        result.identityResolution = {
+          granularity: semantic.variant ? "variant" : "product_family",
+          productFamily: semantic.family,
+          unresolvedFields: [
+            ...semantic.unresolved,
+            ...new Set(
+              evidence.physical.map(
+                (p) =>
+                  (
+                    ({
+                      model_number: "modelNumber",
+                      sku: "sku",
+                      part_number: "partNumber",
+                    }) as const
+                  )[p.identifier.kind],
+              ),
+            ),
+          ],
+          evidence: [],
+        };
+        if (semantic.variantConflict) {
+          result.reasonCodes.push("semantic_variant_conflict");
+          result.conflictingEvidence.push({
+            code: "semantic_variant_conflict",
+            evidenceRefs: semantic.refs,
+            material: false,
+          });
+        }
+      }
+    }
+  }
+  // Broad identity does not require an electronics label. Only an actually
+  // observed model-like clue should lead to that request in the exact-ID path.
+  if (
+    result.missingEvidenceType === "physical_identifier" &&
+    !input.semantic?.evidence.exactMatch.some((clue) => {
+      if (clue.kind !== "model_number" && clue.kind !== "sku") return false;
+      const product = input.semantic!.identification;
+      const value =
+        clue.kind === "model_number" ? product.modelNumber : product.sku;
+      return (
+        value &&
+        product.visibleText.includes(clue.observation) &&
+        identifierObservations(
+          { kind: clue.kind, value },
+          clue.observation,
+          "semantic",
+        ).some((m) => m.match === "literal")
+      );
+    })
+  ) {
+    result.missingEvidenceType = "distinguishing_view";
+    result.followUpReason =
+      "Readable branding, product name and variant wording are needed to distinguish the product.";
+  }
+  result.identityResolution.evidence = result.provenance
+    .filter(
+      (ref) =>
+        result.supportingEvidence.includes(ref.id) &&
+        ref.source !== "visual_retrieval",
+    )
+    .flatMap((ref) => {
+      const observation = ref.observation as {
+        title?: string;
+        value?: string;
+        images?: { regions: { raw_text: string }[] }[];
+        observation?: string;
+      };
+      const text =
+        ref.source === "gemini"
+          ? observation.observation
+          : (observation.title ??
+            observation.value ??
+            observation.images
+              ?.flatMap((image) =>
+                image.regions.map((region) => region.raw_text),
+              )
+              .join(" · "));
+      return text
+        ? [
+            {
+              source: ref.source as
+                "paddleocr" | "product_search" | "google_lens" | "gemini",
+              observationGroup: ref.observationGroup,
+              imageIndexes: ref.imageIndexes,
+              sourceUrl: ref.sourceUrl ?? null,
+              text,
+            },
+          ]
+        : [];
+    });
+  return result;
+}
+
+function adjudicateIdentifiers(input: FusionInput): FusionResult {
   const evidence = adaptEvidence(input);
   const { physical, associations, brands, conflicts, reasons } = evidence;
   const supporting = new Set<string>();
@@ -244,10 +421,12 @@ const FOLLOW_UP_REASONS: Record<MissingEvidenceType, string> = {
 /** Presentation mapping stays separate from decision rules. Search-side work
  * must never turn into a repeated request for a physical label. */
 export function suggestedFusionImage(result: FusionResult): string | null {
+  if (result.identityResolution?.unresolvedFields.includes("variant"))
+    return "Take a clear front or side photo showing the variant, flavor or style wording; include the barcode if available.";
   if (result.missingEvidenceType === "physical_identifier")
     return "Take a clear photo of the model/SKU/part-number label on the product.";
   if (result.missingEvidenceType === "distinguishing_view")
-    return "Take another angle showing the physical features that distinguish the possible variants.";
+    return "Take a clearer front or side photo showing the brand, product name and wording that distinguishes the possible variants.";
   return null;
 }
 
@@ -272,11 +451,14 @@ export function toProductIdentification(
     identificationStatus: result.status,
     reasoning:
       result.status === "confirmed"
-        ? "An explicit physical identifier agrees exactly with independent external product association, with no unresolved contradiction."
+        ? result.identityResolution?.granularity === "exact_model"
+          ? "An explicit physical identifier agrees exactly with independent external product association, with no unresolved contradiction."
+          : `Physical product wording agrees with independent external product evidence at the ${result.identityResolution?.granularity === "variant" ? "variant" : "product family"} level.${result.identityResolution?.unresolvedFields.includes("variant") ? " Variant wording remains unresolved; the family identity is supported." : ""}`
         : (result.followUpReason ??
           "Exact identity is not established by the available evidence."),
     suggestedNextImage: suggestedFusionImage(result),
     candidates: [],
+    identityResolution: result.identityResolution,
   });
 }
 

@@ -2,7 +2,7 @@
 
 Banana Lens is a stateless Next.js App Router application. The initial release
 uses explicit demo providers by default. Live identification defaults to local
-OCR + Product Search + deterministic Fusion, with optional Gemini fallback.
+OCR + Lens candidate discovery + Product Search + deterministic Fusion, with optional Gemini fallback.
 Unfinished shopping/review/verification adapters return typed errors. API credentials never
 enter the browser bundle.
 
@@ -11,8 +11,10 @@ enter the browser bundle.
 ```text
 Upload / camera / additional images
   -> POST /api/identify (multipart validation)
-  -> services/analysis -> local OCR CLI -> Product Search -> derived associations
-  -> fuseProductEvidence -> ProductIdentification (optional Gemini if unconfirmed)
+  -> services/analysis -> parallel local OCR CLI + immediate SerpApi Lens upload
+  -> text Product Search -> exact associations + semantic phrase aggregation
+  -> fuseProductEvidence -> ProductIdentification with identityResolution
+     (optional Gemini + bounded name-search fallback if unconfirmed)
   -> uncertain/likely: request another image or verify a candidate
   -> confirmed: GET /api/prices and GET /api/reviews concurrently
   -> shared response schemas -> result dashboard and recommendation
@@ -31,7 +33,13 @@ ProductOffer, ReviewSource, ReviewInsights, and IdentificationStatus.
 product queries, and candidate selection. `src/types/index.ts` exports their
 inferred TypeScript types. Nullable fields represent unavailable evidence.
 The status is confirmed, likely, or uncertain; no numerical confidence score is
-claimed to be a calibrated probability.
+claimed to be a calibrated probability. Optional `identityResolution` adds
+`granularity` (`product_family`, `variant`, `exact_model`, or null), `productFamily`,
+`unresolvedFields`, and supporting source/image/text provenance. Confirmation
+applies at that precision: an unknown size or conflicting variant need not erase
+a supported broader identity. Legacy/demo consumers may omit this metadata.
+Shopping/review owners must inspect precision before exact downstream matching;
+their existing model-number query contract is unchanged.
 
 `src/lib/providers/interfaces.ts` is the shared integration boundary. Identification,
 Lens, Shopping, review search, review analysis, and candidate verification have
@@ -46,7 +54,14 @@ substitutes mock data.
 temporary files, timeout, output limit, no shell and unconditional cleanup. Strong
 OCR identifiers become typed Search inputs; serials are excluded. Search results
 flow through the existing association adapter and deterministic Fusion. Exact
-physical/external agreement can confirm without Gemini or visual retrieval.
+physical/external agreement still confirms exact identifiers without Gemini or
+visual retrieval. Literal physical product wording plus independently retrieved
+subject titles can also confirm families/variants without model numbers. Phrase
+normalization preserves ordered whole words and distinct variant tails. Lens
+supplies hypotheses, never exact authority; image-indexed provider observations
+retain provenance. Conflicting variants retain the family, while physically
+grounded family or identifier contradictions block confirmation. OCR/Gemini of
+the same image share physical observation groups; no repeated-source voting.
 Failed components provide no fabricated evidence. Existing response metadata
 carries safe availability notices; Fusion supplies status, reasoning and photo
 follow-up. The UI does not substitute a label request for a null photo suggestion.
@@ -80,17 +95,22 @@ public identification/status/type/provider contracts are unchanged. Perception
 and whether visual clues exclude lookalikes still depend on Gemini; validation
 checks structure and evidence consistency, not independent visual truth.
 
-Future milestones may add Lens candidates and identity/model/variant verification.
-`src/lib/search/lens.ts` and `src/lib/products/verification.ts` are Product Search
-search/verification extension points. Shared Gemini initialization is in `src/lib/ai/client.ts`.
+`src/lib/search/lens.ts` now discovers live candidates through the existing
+SerpApi Product Search adapter. `src/lib/products/verification.ts` remains the
+deferred candidate-verification extension point. Shared Gemini initialization is in `src/lib/ai/client.ts`.
 The SDK client is created only for a live identification operation.
 
 All images contributing to the current identity are resubmitted together. No
 session database or permanent upload storage is used. Image counts, MIME types,
 sizes, and file signatures are checked on the server and UX limits on the client.
 The client releases preview URLs on removal/reset/unmount. Image analysis is
-not cached or logged. Lens requires a reachable image URL; the Product Search owner
-must agree on a temporary, privacy-conscious transport before enabling it.
+not cached or logged. Lens uses SerpApi's direct multipart Image API and an
+immediate `image_id` search, with no public hosting. Static images are oriented,
+stripped of metadata, and compressed within fixed attempts below 500 KB. Provider
+IDs expire in ten minutes; this does not assert vendor deletion/retention. Ordered
+image indexes survive partial failures; upload IDs/credentials/raw errors are not
+returned. Existing row validation, timeouts and shared rate budgets are reused.
+See the runtime guide for provider documentation and manual request bounds.
 
 The deterministic demo ignores image content. In the confirm scenario one image
 returns a confirmed LG 27GP850-B. In the follow-up scenario one image returns a
@@ -128,7 +148,7 @@ requires no Redis, database, or background workers and is not durable storage.
 
 `src/lib/config/env.ts` validates server-only live/mock, identification mode,
 OCR executable/timeout and Gemini settings. Mock is the default. Evidence mode
-uses local OCR and external Search with optional Gemini; explicit legacy Gemini
+uses local OCR, Lens uploads and external Search with optional Gemini; explicit legacy Gemini
 mode requires its key and model. Component availability is surfaced through safe
 notices or errors, never synthetic fallback. Unfinished adapters report 501.
 Errors use `{ error: { code, message } }`; private provider exceptions are not
@@ -145,12 +165,12 @@ Neither diagnostic path logs image bytes or Gemini response text.
 
 ## Independent evidence architecture
 
-Target flow (OCR + Search + Fusion is active; retrieval remains deferred):
+Evidence flow (OCR + Lens + Search + Fusion is active; SigLIP runtime remains deferred):
 
 ```text
 Product images (same ordered views)
   +-> OCR: text and identifiers ---------------------+
-  +-> Visual retrieval: candidate similarity --------+-> Evidence fusion
+  +-> Lens: visual candidate/source discovery -------+-> Evidence fusion
   +-> Gemini: semantic hypotheses/observations ------+      |
                                                            v
                                                      Product candidates
@@ -173,9 +193,9 @@ visible text and image references without a duplicate semantic domain model.
 `src/lib/identification/fusion.ts` accepts the source-tagged semantic signal and
 returns a cloned, adjudicated `ProductIdentification`. Parsing/schema validation
 and checking image references remain in the Gemini adapter; status policy is
-separate from JSON/SDK handling. The first implementation deliberately preserves
-the old policy. There are no numerical weights, new external calls, inferred
-probabilities, automatic retries, or changes to mock mode.
+separate from JSON/SDK handling. The exact-identifier policy is preserved; general-product semantic rules extend it. Fusion itself makes no external calls and uses no numerical weights or inferred
+probabilities. Provider discovery is separate, with no automatic retries or changes
+to mock mode.
 
 Future sources are documented design targets, not unused runtime schemas or
 placeholder providers. Extend the fusion input through a coordinated shared

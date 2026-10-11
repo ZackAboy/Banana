@@ -19,6 +19,7 @@ import {
   sanitizeRaw,
 } from "./url";
 import type { BuiltQuery, RequestRecord } from "./types";
+import { prepareLensImage } from "./lens-image";
 
 export interface SerpApiOptions {
   apiKey: string | undefined;
@@ -29,6 +30,7 @@ export interface SerpApiOptions {
   minResultsBeforeFallback?: number;
   fetch?: typeof fetch;
   baseUrl?: string;
+  imageUploadUrl?: string;
   /** Explicit isolated limiter for tests; live construction shares a process budget. */
   acquire?: () => void;
 }
@@ -132,16 +134,21 @@ export function createSerpApiProviders(
     engine: string,
     q: BuiltQuery | null,
     parse: (body: Record<string, unknown>, request: RequestRecord) => void,
+    uploadedImageId?: string,
   ) {
     if (input.signal.aborted) return;
     const image = engine === "google_lens" ? input.imageUrl : null;
     const request: RequestRecord = {
-      id: `request_${hash(JSON.stringify([engine, q?.id ?? "lens-image", q?.text ?? image, country, language]))}`,
+      id: `request_${hash(JSON.stringify([engine, q?.id ?? "lens-image", q?.text ?? uploadedImageId ?? image, country, language]))}`,
       queryId: q?.id ?? "lens-image",
       engine,
       queryText: q?.text ?? null,
       inputImageUrl: image ? imageReferenceUrl(image) : null,
-      inputImageId: image ? `image_${hash(image)}` : null,
+      inputImageId: uploadedImageId
+        ? `image_${hash(uploadedImageId)}`
+        : image
+          ? `image_${hash(image)}`
+          : null,
       country,
       language,
       executed: false,
@@ -166,6 +173,7 @@ export function createSerpApiProviders(
       url.searchParams.set("hl", language);
       if (q) url.searchParams.set("q", q.text);
       if (image) url.searchParams.set("url", image);
+      if (uploadedImageId) url.searchParams.set("image_id", uploadedImageId);
       url.searchParams.set("api_key", options.apiKey);
       request.executed = true;
       progress();
@@ -388,46 +396,119 @@ export function createSerpApiProviders(
     kind: "visual",
     timeoutMs,
     async search(input) {
-      if (!input.imageUrl) throw skip();
-      if (!isPublicImageUrl(input.imageUrl))
+      if (!input.imageUrl && !input.image) throw skip();
+      if (input.imageUrl && !isPublicImageUrl(input.imageUrl))
         throw new ProviderError("INVALID_RESPONSE");
-      // TODO(ProductSearch): agree image transport separately; no upload/hosting here.
       const output = emptyOutput();
-      await execute(input, output, "google_lens", null, (body, request) => {
-        for (const field of [
-          "exact_matches",
-          "visual_matches",
-          "organic_results",
-        ])
-          for (const row of rows(body, field, request)) {
-            const hit = base(row, field, request);
-            if (!hit) continue;
-            output.pages.push({
-              ...hit,
-              snippet: str(row.snippet) ?? str(row.source),
-            });
-            const price = record(row.price);
-            const merchant = str(row.source);
-            if (merchant && Object.keys(price).length)
-              output.offers.push({
+      let uploadedImageId: string | undefined;
+      if (input.image) {
+        const request: RequestRecord = {
+          id: `upload_${hash(Buffer.from(input.image.data).toString("base64"))}`,
+          queryId: "lens-upload",
+          engine: "image_upload",
+          queryText: null,
+          inputImageUrl: null,
+          inputImageId: null,
+          country,
+          language,
+          executed: false,
+          status: "pending",
+          error: null,
+          retrievedAt: new Date().toISOString(),
+          discardedRows: 0,
+        };
+        output.requests!.push(request);
+        try {
+          if (!options.apiKey?.trim())
+            throw new ProviderError("NOT_CONFIGURED");
+          const bytes = await prepareLensImage(input.image);
+          if (input.signal.aborted) throw new ProviderError("TIMEOUT");
+          acquire();
+          const form = new FormData();
+          form.set(
+            "image",
+            new Blob([new Uint8Array(bytes)], { type: "image/jpeg" }),
+            "product.jpg",
+          );
+          form.set("api_key", options.apiKey);
+          request.executed = true;
+          input.onProgress?.(output);
+          const response = await (options.fetch ?? fetch)(
+            options.imageUploadUrl ?? "https://serpapi.com/image",
+            {
+              method: "POST",
+              body: form,
+              signal: input.signal,
+            },
+          );
+          if ([401, 403].includes(response.status))
+            throw new ProviderError("AUTH");
+          if (response.status === 429) throw new ProviderError("RATE_LIMITED");
+          if (!response.ok) throw new ProviderError("HTTP_ERROR");
+          const body = await response.json();
+          const parsed = z
+            .object({
+              image_id: z.string().regex(/^[a-zA-Z0-9_-]{1,512}$/),
+              error: z.string().optional(),
+            })
+            .safeParse(body);
+          if (!parsed.success || parsed.data.error)
+            throw new ProviderError("INVALID_RESPONSE");
+          uploadedImageId = parsed.data.image_id;
+          request.inputImageId = `image_${hash(uploadedImageId)}`;
+          request.status = "ok";
+        } catch (error) {
+          request.status = "error";
+          request.error = safeProviderError(
+            input.signal.aborted ? new ProviderError("TIMEOUT") : error,
+          );
+        }
+        request.retrievedAt = new Date().toISOString();
+        if (!input.signal.aborted) input.onProgress?.(output);
+        if (!uploadedImageId || input.signal.aborted) return output;
+      }
+      await execute(
+        input,
+        output,
+        "google_lens",
+        null,
+        (body, request) => {
+          for (const field of [
+            "exact_matches",
+            "visual_matches",
+            "organic_results",
+          ])
+            for (const row of rows(body, field, request)) {
+              const hit = base(row, field, request);
+              if (!hit) continue;
+              output.pages.push({
                 ...hit,
-                merchant,
-                price: str(price.value),
-                currencyHint: /^[A-Z]{3}$/.test(str(price.currency) ?? "")
-                  ? str(price.currency)
-                  : currencyHint,
-                listPrice: null,
-                availability:
-                  typeof row.in_stock === "boolean"
-                    ? row.in_stock
-                      ? "in_stock"
-                      : "out_of_stock"
-                    : str(row.stock_information),
-                condition: str(row.condition),
-                shipping: null,
+                snippet: str(row.snippet) ?? str(row.source),
               });
-          }
-      });
+              const price = record(row.price);
+              const merchant = str(row.source);
+              if (merchant && Object.keys(price).length)
+                output.offers.push({
+                  ...hit,
+                  merchant,
+                  price: str(price.value),
+                  currencyHint: /^[A-Z]{3}$/.test(str(price.currency) ?? "")
+                    ? str(price.currency)
+                    : currencyHint,
+                  listPrice: null,
+                  availability:
+                    typeof row.in_stock === "boolean"
+                      ? row.in_stock
+                        ? "in_stock"
+                        : "out_of_stock"
+                      : str(row.stock_information),
+                  condition: str(row.condition),
+                  shipping: null,
+                });
+            }
+        },
+        uploadedImageId,
+      );
       return output;
     },
   };

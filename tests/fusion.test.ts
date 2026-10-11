@@ -206,7 +206,7 @@ describe("deterministic evidence fusion acceptance", () => {
     const result = fuseProductEvidence(input);
     expect(result.status).toBe("likely");
     expect(result.reasonCodes).toContain("raw_similarity_is_not_identity");
-    expect(result.missingEvidenceType).toBe("physical_identifier");
+    expect(result.missingEvidenceType).toBe("distinguishing_view");
   });
   it("identifier conflict wins over strong visual compatibility (case 5)", async () => {
     const input = await fixture("CFI-ZCT2W");

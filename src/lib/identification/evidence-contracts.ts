@@ -157,7 +157,12 @@ export interface FusionIdentity {
 
 export interface EvidenceReference {
   id: string;
-  source: "paddleocr" | "product_search" | "visual_retrieval" | "gemini";
+  source:
+    | "paddleocr"
+    | "product_search"
+    | "google_lens"
+    | "visual_retrieval"
+    | "gemini";
   // Different processors of the same image share this underlying observation.
   observationGroup: string;
   imageIndexes: number[];
@@ -187,4 +192,7 @@ export interface FusionResult {
   followUpReason: string | null;
   followUpOwner: "user" | "product_search" | "fusion" | null;
   provenance: EvidenceReference[];
+  identityResolution?: NonNullable<
+    import("@/types").ProductIdentification["identityResolution"]
+  >;
 }

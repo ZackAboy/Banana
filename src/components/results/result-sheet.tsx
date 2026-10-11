@@ -163,9 +163,17 @@ export function ResultSheet({
             </div>
 
             {!id.modelNumber && (
+              // TODO(ProductSearch): consume identityResolution for general-product
+              // shopping queries and variant-safe matching without a model number.
+              // TODO(Reviews): consume supported family/variant precision for review
+              // matching without requiring an electronics-style model number.
               <p className="mt-4 rounded-2xl bg-muted p-4 text-sm">
-                An exact model number is needed before matching offers and
-                reviews.
+                {id.identityResolution?.granularity
+                  ? "Product identified. Shopping and review matching for products without model numbers is not available yet."
+                  : "An exact model number is needed before matching offers and reviews."}
+                {id.suggestedNextImage && (
+                  <span className="mt-2 block">{id.suggestedNextImage}</span>
+                )}
               </p>
             )}
 

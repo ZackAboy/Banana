@@ -1,15 +1,51 @@
-# Deterministic evidence fusion
+# Deterministic product identification
 
-`fuseProductEvidence` is a synchronous, offline adjudication primitive exported
-from `fusion.ts`. It makes no provider, Gemini, model, network or image-download
-calls. Live `/api/identify` now calls `identifyWithEvidence` in `runtime.ts`:
-ordered uploads → local OCR CLI → Product Search → derived associations → Fusion
-→ existing `ProductIdentification`. Gemini is optional fallback and is skipped
-on deterministic confirmation. `IDENTIFICATION_MODE=gemini` preserves the explicit
-legacy `fuseEvidence` path. Mock mode is unchanged.
+Live `/api/identify` uses ordered uploaded photos → parallel local PaddleOCR and
+SerpApi Lens discovery → text Product Search → deterministic Fusion → the existing
+`ProductIdentification`. Gemini is an optional semantic fallback, skipped when
+Fusion confirms. Mock mode remains offline and deterministic. SigLIP runtime,
+embeddings, catalog infrastructure, reviews and price shopping are deferred.
 
-See [runtime setup and manual test](RUNTIME.md) for configuration, failure behavior,
-local process limits and remaining integration boundaries.
+## General products and precision
+
+`identityResolution` is optional additive API metadata. It contains:
+
+- `granularity`: `product_family`, `variant`, `exact_model`, or null when unnamed.
+- `productFamily`: the supported broader name.
+- `unresolvedFields`: variant, size or identifiers still needing evidence.
+- `evidence`: source, physical/external observation group, ordered image indexes,
+  source URL and observed text. Full findings remain in internal `FusionResult`.
+
+Status applies to the returned precision. A confirmed family with an unresolved
+variant, or a confirmed variant with unresolved size, is valid. Downstream work
+must inspect granularity/unresolved fields before making exact offer/review matches.
+`modelNumber`/`sku` stay null on semantic confirmation; an observed but unassociated
+identifier remains in OCR provenance and unresolved fields, not exact identity.
+Legacy/demo results may omit the metadata. Gemini cannot author this metadata.
+
+`semantic-products.ts` conservatively joins physical product wording to external
+subject titles. It normalizes casing, whitespace and punctuation using whole,
+ordered phrases, including at most three adjacent OCR regions. It never uses
+fuzzy distance, query echoes, model confidence, result rank or source-count votes.
+A product-name phrase, or separately grounded branding plus a wordmark, supplies a
+family anchor. Additional physically observed wording can resolve a variant.
+Source-declared/Gemini variants split a full name only when physically transcribed.
+Unobserved source tails cannot create exact variants. Size/package suffixes remain
+unresolved rather than blocking identity. Different variants preserve the shared
+family; different physically grounded families remain a material conflict.
+These lexical rules deliberately miss aliases, reordered titles and obscured text.
+
+Gemini interpretation alone supplies a tentative family. Indexed transcribed
+packaging/label text can ground a broad identity with independent external evidence
+when OCR misses it, but cannot manufacture exact identifiers. OCR and Gemini of
+image N share `physical:N`; repeated processing is never another independent vote.
+Lens titles/URLs/images retain their provider and image provenance. Lens alone
+cannot confirm or populate model/SKU fields. Exact association derivation excludes
+Lens hypotheses; Lens wording does not independently veto a textual association.
+A physically grounded product-family conflict still vetoes exact confirmation.
+
+See [runtime setup and bounded smoke tests](RUNTIME.md) for configuration,
+degradation and transport. Existing exact-identifier rules follow below.
 
 ## Input
 
@@ -110,7 +146,7 @@ Identity includes brand, product name, model, SKU, part number and variant;
 serial numbers stay in provenance and never identify a product. No probability
 or weighted confidence is returned.
 
-Confirmation requires all of:
+Exact model/SKU confirmation requires all of:
 
 1. A span-grounded, explicitly labeled physical model/SKU/part number. Spatial
    label inference and generic text are retained but cannot confirm.
@@ -138,9 +174,8 @@ They are not proof of a conflicting product identity. Reviewed associations and
 disagreements inside their source groups receive the material checks above.
 
 OCR alone, Search alone, visual retrieval alone, and Gemini plus OCR of the same
-label cannot confirm through this primitive. A single provisional family/name
-can be likely; multiple supported identities or materially conflicting evidence
-are uncertain. Equal normalized display identities and identical typed claims
+label cannot confirm without independent external evidence. A single provisional family/name can be likely. Semantic agreement can confirm
+a family/variant; conflicting exact identities or product families remain uncertain. Equal normalized display identities and identical typed claims
 can coalesce across source groups. Different aliases/claim sets remain ambiguous;
 there is no canonical-product ontology or top-ranked winner.
 
@@ -153,29 +188,30 @@ Retrieval preserves query indexes, candidate image URL/ID, native metric/scores,
 checkpoint/revision/preprocessing and the explanation of any assessment. Its
 comparison evidence cannot act as another exact-identifier confirmation.
 
-Gemini's original status is ignored in the new primitive. Its family hypothesis
-can supply a provisional name, but model guesses cannot supply physical identity.
+Gemini's original status is ignored in the new primitive. Its family hypothesis can supply a provisional name, but model guesses cannot
+supply physical identifiers.
 An explicitly grounded conflicting Gemini transcription or `conflictingImages`
 is preserved as a conflict; agreement on the same photo adds no independent vote.
 
 ## Follow-up and application projection
 
-| Missing evidence       | Owner          | Photo request                                                           |
-| ---------------------- | -------------- | ----------------------------------------------------------------------- |
-| `physical_identifier`  | User           | Clear model/SKU/part-number label, only when no strong label is present |
-| `external_association` | Product Search | None: the physical label is already available                           |
-| `distinguishing_view`  | User           | Angle showing distinguishing physical features                          |
-| `conflict_resolution`  | Fusion         | None automatically; reconcile conflicting references first              |
-| None (confirmed)       | None           | None                                                                    |
+| Missing evidence       | Owner          | Photo request                                                               |
+| ---------------------- | -------------- | --------------------------------------------------------------------------- |
+| `physical_identifier`  | User           | Clear model/SKU label only for an actually transcribed identifier ambiguity |
+| `external_association` | Product Search | None: the physical label is already available                               |
+| `distinguishing_view`  | User           | Clear front/side branding and product/variant wording                       |
+| `conflict_resolution`  | Fusion         | None automatically; reconcile conflicting references first                  |
+| None (confirmed)       | None           | None                                                                        |
 
 `suggestedFusionImage` maps these structured decisions to presentation text.
 `toProductIdentification(result, input)` validates a backwards-compatible
-projection through the unchanged shared schema. It clears stale Gemini follow-up
+projection through the additively extended shared schema. It clears stale Gemini follow-up
 instructions, preserves available transcriptions/features, and never invents
 missing fields. Part numbers, detailed findings and source groups stay in
 `FusionResult`: the public type has no part-number field. Public `candidates`
 remain empty because source groups are not safely selectable canonical identities.
-UI/API exposure of those findings is a later coordinated change.
+The additive resolution metadata exposes supporting observations and precision.
+Full conflict references and part numbers remain internal.
 
 CFI-ZCT1W and CFI-ZCT2W each confirm when their physical observation and independent
 subject-product association agree, with visual compatibility or no comparison.
@@ -198,8 +234,8 @@ never sufficient confirmation.
    MIME/byte/time limits and explained visual assessments before runtime wiring.
    No downloader, hosting, raw-score threshold or SigLIP runtime is included.
 4. **Fusion maintainers:** expose detailed Fusion provenance/part numbers through
-   a coordinated additive API/UI contract only when needed; runtime currently
-   projects the existing identification fields and safe notices.
+   a coordinated additive API/UI contract only when needed; runtime now
+   projects resolution/supporting observations and safe notices.
 
 Assumptions: explicit OCR labels refer to the photographed object; OCR's
 `label_role: unknown` is preserved and never relabeled as manufacturer-verified.
@@ -212,14 +248,9 @@ These limitations can produce uncertainty rather than unsafe automatic merging.
 
 ## Validation
 
-`npx vitest run tests/search-associations.test.ts tests/fusion.test.ts` covers
-direct subject association, both controller models and an unrelated synthetic
-product, accessory/compatibility/negation, physical and source-group conflicts,
-normalized-only matches, provenance and the original Fusion regressions.
-Tests are offline: no Gemini, external APIs, Python inference or model downloads.
-Run the repository tests, typecheck, lint, format check and `git diff --check`
-alongside them. Python modules/dependencies and public API/provider schemas are
-unchanged. The existing association finding shape is unchanged. The additive
-Fusion export is `deriveSearchAssociations`; omitted `FusionInput.associations`
-now derives findings, while explicit arrays preserve caller control. Search's
-identifier matching semantics are unchanged.
+Run `npm run check` and `git diff --check`. The canonical suite is offline and
+includes existing Product Search/association/Fusion regressions plus general
+product, granularity, conflict, tailored follow-up, bounded image preparation,
+mock HTTP upload/partial Lens results and runtime fallback coverage. No live API,
+Python inference or model download occurs. Manual smoke cases are opt-in in the
+runtime guide. Python modules and exact identifier comparison are unchanged.

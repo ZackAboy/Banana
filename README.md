@@ -5,7 +5,7 @@
 A Banana Hacks visual shopping assistant that turns a product photo into an
 identity, matching offers, review evidence, and a concise purchasing perspective.
 When the exact product is unclear, it requests another useful photo instead of
-pretending to know. The default is a complete **synthetic demo**. Live local OCR + Search + Fusion identification is implemented, with optional
+pretending to know. The default is a complete **synthetic demo**. Live local OCR + Lens + Search + Fusion identification is implemented, with optional
 Gemini fallback; other live integrations remain unfinished. See the
 [runtime setup and DualSense manual test](src/lib/identification/RUNTIME.md).
 Live failures never silently fall back to fake data.
@@ -131,8 +131,9 @@ ignored; only `.env.example` is intended for version control.
 
 Live evidence mode needs the provisioned local OCR environment and a SerpApi
 key for independent external evidence. Gemini is optional when both key and vision
-model are configured. Missing OCR can use semantic family fallback, but cannot
-confirm in evidence mode. Component failures never become demo evidence. See the
+model are configured. Missing OCR can use Lens/semantic fallback; indexed
+packaging transcriptions still need independent external evidence to confirm a
+broad identity. Lens alone remains tentative. Component failures never become demo evidence. See the
 [runtime guide](src/lib/identification/RUNTIME.md) for exact limits and errors.
 Unfinished adapters still return `501 PROVIDER_NOT_IMPLEMENTED`.
 
@@ -200,7 +201,9 @@ demo by setting `USE_MOCK_SERVICES=true` and restarting the server.
   normalization and verification, then shopping. Lens is one source rather than
   the sole identification mechanism.
 
-OCR + Search + deterministic Fusion now run behind the existing frontend contract.
+OCR + Lens + Search + deterministic Fusion now identify product families,
+variants and exact models behind the extended frontend contract. See
+[general identification](src/lib/identification/README.md) for precision and provenance.
 Runtime retrieval, richer association and shopping/review implementations remain
 separate work. YOLO remains deferred. See the [runtime guide](src/lib/identification/RUNTIME.md)
 for evidence limits and manual validation.

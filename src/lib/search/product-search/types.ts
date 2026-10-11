@@ -89,6 +89,7 @@ export const providerRefSchema = z.object({
   queryId: text,
   requestId: z.string().nullable(),
   retrievedAt: timestamp,
+  sourceImageIndex: z.number().int().positive().optional(),
 });
 export const identifierObservationSchema = z.object({
   kind: identifierKindSchema,
@@ -219,6 +220,7 @@ export const providerRunSchema = z.object({
   durationMs: z.number().nonnegative(),
   itemCount: z.number().int().nonnegative(),
   error: safeErrorSchema.nullable(),
+  sourceImageIndex: z.number().int().positive().optional(),
 });
 export const builtQuerySchema = z.object({
   id: text,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ImageInput } from "@/lib/providers/interfaces";
 import { isEvidenceUrl } from "./url";
 import {
   httpUrl,
@@ -57,6 +58,7 @@ export interface ProviderInput {
   query: ProductSearchQuery;
   queries: BuiltQuery[];
   imageUrl: string | null;
+  image?: ImageInput;
   signal: AbortSignal;
   /** Validated snapshots preserve completed requests if a later request times out. */
   onProgress?: (output: ProviderOutput) => void;

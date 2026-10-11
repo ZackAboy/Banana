@@ -189,13 +189,16 @@ describe("live evidence orchestration (offline dependencies)", () => {
       }),
     );
   });
-  it("successful OCR with no identifier uses semantic family fallback and requests missing label", async () => {
+  it("successful OCR with no identifier searches the semantic family and requests its observed missing model label", async () => {
     const deps = dependencies();
     const ocr = physical();
     ocr.images[1].identifiers = [];
     vi.mocked(deps.ocr).mockResolvedValue(ocr);
     const result = await identifyWithEvidence(images, deps);
-    expect(deps.search).not.toHaveBeenCalled();
+    expect(deps.search).toHaveBeenCalledWith({
+      brand: "Sony",
+      product: "DualSense Wireless Controller",
+    });
     expect(result.identification.identificationStatus).toBe("likely");
     expect(result.identification.modelNumber).toBeNull();
     expect(result.identification.suggestedNextImage).toMatch(/label/);
@@ -241,7 +244,10 @@ describe("live evidence orchestration (offline dependencies)", () => {
     expect(
       result.fusion.provenance.some((ref) => ref.source === "paddleocr"),
     ).toBe(false);
-    expect(deps.search).not.toHaveBeenCalled();
+    expect(deps.search).toHaveBeenCalledWith({
+      brand: "Sony",
+      product: "DualSense Wireless Controller",
+    });
     expect(result.notice).toMatch(/No physical OCR evidence/);
   });
   it("returns a clear error when no identification component can run", async () => {
@@ -264,7 +270,7 @@ describe("live evidence orchestration (offline dependencies)", () => {
     const result = await identifyWithEvidence(images, deps);
     expect(result.fusion.status).toBe("uncertain");
     expect(result.notice).toBeNull();
-    expect(result.identification.suggestedNextImage).toMatch(/label/);
+    expect(result.identification.suggestedNextImage).toMatch(/front or side/);
   });
   it.each(["sku", "part_number"] as const)(
     "preserves %s typing and spelling",

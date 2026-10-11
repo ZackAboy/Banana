@@ -162,16 +162,22 @@ export function adaptEvidence(input: FusionInput): AdaptedEvidence {
     candidate.observations.forEach((observation, index) =>
       add({
         id: `search:${candidate.id}:${index}`,
-        source: "product_search",
+        source:
+          observation.kind === "visual" ? "google_lens" : "product_search",
         // Same-domain repeats never increase evidence strength. There is no vote
         // count; originGroup below can additionally link syndicated observations.
         observationGroup: `external:${new URL(observation.url).hostname}`,
-        imageIndexes: [],
+        imageIndexes: observation.sourceImageIndex
+          ? [observation.sourceImageIndex]
+          : [],
         candidateId: candidate.id,
         sourceUrl: observation.url,
         observation,
       }),
     );
+    candidate.observations.forEach((o) => {
+      if (o.sourceImageIndex) checkImage(o.sourceImageIndex);
+    });
     candidate.observations.forEach((observation, index) => {
       for (const mention of observation.identifiers) {
         for (const physical of result.physical) {

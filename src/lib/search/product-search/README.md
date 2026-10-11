@@ -78,12 +78,12 @@ using a server-side `api_key`. Parsers remain engine-specific:
 - [`google_shopping`](https://serpapi.com/google-shopping-api): shopping rows,
   product IDs, imagery and condition. A `product_link` is labeled
   `google_product_page`, not asserted to be merchant checkout.
-- [`google_lens`](https://serpapi.com/google-lens-api): optional public image URL;
+- [`google_lens`](https://serpapi.com/google-lens-api): optional ordered image bytes or public image URL;
   uses `country`, preserves `exact_matches`/`visual_matches`/`organic_results`
   origin, images and boolean stock. Lens “exact” sections do not mean exact model
   evidence. No similarity score is invented.
 
-Lens cannot consume local files/bytes here. No upload/hosting is implemented. An
+Uploaded bytes use the direct Image API described below. An
 explicitly supplied public image URL is transmitted to SerpApi; its query/fragment
 are removed from returned references and a hash correlates the actual input.
 Obvious local/private URLs are rejected, but DNS reachability is not verified.
@@ -151,3 +151,21 @@ tests/product-search/live.test.ts`. Optional `PRODUCT_SEARCH_QUERY` overrides cl
 opt-in run. Treat saved search text/URLs as potentially private. Exact billable
 quota depends on the provider plan/cache/outcomes; budget up to one credit per
 executed request, without relying on free or cached requests.
+
+## Uploaded Lens discovery for general identification
+
+Live evidence identification now supplies ordered `images` to `runProductSearch`
+with only the existing visual provider. Each image is compressed below 500 KB,
+uploaded directly to SerpApi `/image`, then searched with its short-lived `image_id`.
+Public image URLs remain supported for existing callers. `sourceImageIndex` is
+optional additive provenance on provider runs/references/observations. Credentials,
+raw upload errors and usable upload IDs never enter results or debug payloads.
+Uploads share the process request budget with Search/Lens. Malformed Lens rows
+are discarded individually. No retry or review discovery is enabled by this path.
+See [transport, quotas and smoke cases](../../identification/RUNTIME.md).
+
+Lens rows remain candidates: they never derive exact identifier associations or
+supply final identity. Semantic Fusion joins literal physical product wording to
+source titles, resolving family/variant precision conservatively. Existing typed
+identifier matching and Product Search offer/review normalization are unchanged.
+SigLIP and candidate image acquisition remain deferred.

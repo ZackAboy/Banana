@@ -69,8 +69,19 @@ export function ProductIdentityCard({
         {p.productName ?? "Not identified yet"}
       </h1>
       <p className="mt-2 text-sm text-muted-foreground" style={order(3)}>
-        {p.modelNumber ? `Model ${p.modelNumber}` : "Model needs confirmation"}
-        {p.variant ? ` · ${p.variant}` : ""}
+        {p.modelNumber
+          ? `Model ${p.modelNumber}`
+          : p.identityResolution?.granularity === "variant"
+            ? "Variant identified"
+            : p.identityResolution?.granularity === "product_family"
+              ? "Product family identified"
+              : "Product details need confirmation"}
+        {p.variant && !p.productName?.includes(p.variant)
+          ? ` · ${p.variant}`
+          : ""}
+        {p.identityResolution?.unresolvedFields.includes("variant")
+          ? " · Variant unresolved"
+          : ""}
       </p>
     </div>
   );

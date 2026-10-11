@@ -43,6 +43,8 @@ export function parseGeminiSignal(text: string, imageCount: number) {
   const parsed = geminiIdentificationSchema.safeParse(value);
   if (!parsed.success) return invalidGeminiResponse();
   const { identification, evidence } = parsed.data;
+  // Resolution metadata belongs to deterministic Fusion, never model output.
+  delete identification.identityResolution;
   if (evidence.exactMatch.some((clue) => clue.imageIndex > imageCount))
     return invalidGeminiResponse();
 

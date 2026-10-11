@@ -37,6 +37,32 @@ export const productIdentificationSchema = z
     reasoning: z.string(),
     suggestedNextImage: nullableText,
     candidates: z.array(productCandidateSchema),
+    // Additive server-adjudicated metadata. Legacy/demo consumers may omit it.
+    identityResolution: z
+      .object({
+        granularity: z
+          .enum(["product_family", "variant", "exact_model"])
+          .nullable(),
+        productFamily: nullableText,
+        unresolvedFields: z.array(
+          z.enum(["variant", "size", "modelNumber", "sku", "partNumber"]),
+        ),
+        evidence: z.array(
+          z.object({
+            source: z.enum([
+              "paddleocr",
+              "product_search",
+              "google_lens",
+              "gemini",
+            ]),
+            observationGroup: z.string(),
+            imageIndexes: z.array(z.number().int().positive()),
+            sourceUrl: httpUrlSchema.nullable(),
+            text: z.string(),
+          }),
+        ),
+      })
+      .optional(),
   })
   .superRefine((value, ctx) => {
     if (value.identificationStatus === "confirmed" && !value.productName) {

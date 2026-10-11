@@ -1,4 +1,5 @@
 import "server-only";
+import type { ImageInput } from "@/lib/providers/interfaces";
 import { createHash } from "node:crypto";
 import { buildQueries, cleanQuery, queryIdentifiers } from "./query";
 import { computeMatchSignals, tokens } from "./signals";
@@ -30,6 +31,7 @@ import {
 } from "./types";
 
 export interface ProductSearchOptions {
+  images?: ImageInput[];
   imageUrl?: string | null;
   timeoutMs?: number;
   includeReviews?: boolean;
@@ -47,12 +49,24 @@ export async function runProductSearch(
   const queries = buildQueries(query, options.includeReviews === true);
   const startedAt = now().toISOString();
   const runs = await Promise.all(
-    providers.map((provider) =>
-      runProvider(provider, query, queries, options, now),
+    providers.flatMap((provider) =>
+      provider.kind === "visual" && options.images?.length
+        ? options.images.map((image, index) =>
+            runProvider(
+              provider,
+              query,
+              queries,
+              options,
+              now,
+              image,
+              index + 1,
+            ),
+          )
+        : [runProvider(provider, query, queries, options, now)],
     ),
   );
   const merger = new Merger(query);
-  for (const { provider, output } of runs) {
+  for (const { provider, output, sourceImageIndex } of runs) {
     const ref = (hit: {
       queryId: string;
       requestId: string | null;
@@ -65,6 +79,7 @@ export async function runProductSearch(
         queryId: hit.queryId,
         requestId: hit.requestId,
         retrievedAt: request?.retrievedAt ?? now().toISOString(),
+        ...(sourceImageIndex ? { sourceImageIndex } : {}),
       };
     };
     for (const hit of output.pages) merger.addPage(hit, ref(hit));
@@ -100,6 +115,8 @@ async function runProvider(
   queries: BuiltQuery[],
   options: ProductSearchOptions,
   now: () => Date,
+  image?: ImageInput,
+  sourceImageIndex?: number,
 ) {
   const relevant = queries.filter((q) =>
     provider.kind === "reviews"
@@ -129,6 +146,7 @@ async function runProvider(
         query,
         queries: relevant,
         imageUrl: options.imageUrl ?? null,
+        image,
         signal: controller.signal,
         onProgress: (value) => {
           if (!controller.signal.aborted)
@@ -184,8 +202,9 @@ async function runProvider(
     durationMs: Math.round(performance.now() - started),
     itemCount,
     error: failure,
+    ...(sourceImageIndex ? { sourceImageIndex } : {}),
   };
-  return { provider, output, run };
+  return { provider, output, run, sourceImageIndex };
 }
 
 const unique = <T>(items: T[]): T[] => [
@@ -406,13 +425,22 @@ class Merger {
         urls: unique(observations.map((o) => o.url)).sort(),
         foundBy: unique(
           observations.map(
-            ({ provider, kind, engine, queryId, requestId, retrievedAt }) => ({
+            ({
               provider,
               kind,
               engine,
               queryId,
               requestId,
               retrievedAt,
+              sourceImageIndex,
+            }) => ({
+              provider,
+              kind,
+              engine,
+              queryId,
+              requestId,
+              retrievedAt,
+              ...(sourceImageIndex ? { sourceImageIndex } : {}),
             }),
           ),
         ).sort((a, b) => refKey(a).localeCompare(refKey(b))),
